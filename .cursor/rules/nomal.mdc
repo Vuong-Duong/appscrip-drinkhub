@@ -1,0 +1,26 @@
+---
+description: 
+alwaysApply: true
+---
+
+1. Phạm vi tác động (Strict Scope):
+
+Chỉ tập trung xử lý đúng file hoặc logic được yêu cầu.
+
+Không tự ý thay đổi (refactor) lại cấu trúc code, tên biến hoặc logic của các phần không liên quan nếu điều đó không trực tiếp phục vụ yêu cầu hiện tại.
+
+2. Tính nhất quán (Context Integrity):
+
+Trước khi sửa, phải đọc các file liên quan (Dependencies) để đảm bảo code mới khớp với hệ thống hiện tại (ví dụ: khớp kiểu dữ liệu TypeScript, khớp Schema Database).
+
+Nếu thay đổi ở File A gây lỗi ở File B, phải thông báo ngay hoặc đề xuất phương án sửa đồng bộ.
+
+3. Quy trình kiểm soát chất lượng (Verification):
+
+Sau khi viết code, phải thực hiện "Static Analysis" (tự quét lỗi):
+
+Kiểm tra các trường hợp biên (edge cases) và xử lý lỗi (error handling).
+
+Đảm bảo không có biến "lạ" hoặc thư viện chưa được cài đặt.
+
+Chỉ báo "Hoàn thành" sau khi đã tự đối chiếu lại toàn bộ yêu cầu của người dùng.
