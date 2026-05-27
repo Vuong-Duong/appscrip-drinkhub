@@ -288,6 +288,26 @@ const handleDeleteAccount_ = withTryCatch_((payload) => {
   return ok_(deleteAccount(payload.userRole, payload.accountId));
 });
 
+const handleGetShifts_ = withTryCatch_((payload) => {
+  return ok_(getShifts(payload || {}));
+});
+
+const handleCreateShift_ = withTryCatch_((payload) => {
+  const missing = requireFields_(payload, ["staffName"]);
+  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_(createShift(payload));
+});
+
+const handleCloseShift_ = withTryCatch_((payload) => {
+  const missing = requireFields_(payload, ["shiftId"]);
+  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_(closeShift(payload.shiftId, payload));
+});
+
+const handleGetReport_ = withTryCatch_((payload) => {
+  return ok_(getReportData(payload || {}));
+});
+
 const handlePaymentAndroid_ = withTryCatch_((payload) => {
   const missing = requireFields_(payload, ["message"]);
   if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
@@ -330,6 +350,10 @@ const ACTION_HANDLERS = Object.freeze({
   CREATE_ACCOUNT: handleCreateAccount_,
   UPDATE_ACCOUNT: handleUpdateAccount_,
   DELETE_ACCOUNT: handleDeleteAccount_,
+  GET_SHIFTS: handleGetShifts_,
+  CREATE_SHIFT: handleCreateShift_,
+  CLOSE_SHIFT: handleCloseShift_,
+  GET_REPORT: handleGetReport_,
 });
 
 // =========================

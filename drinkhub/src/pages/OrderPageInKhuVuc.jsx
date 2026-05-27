@@ -27,6 +27,7 @@ export default function OrderPage() {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [discount, setDiscount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
 
   useEffect(() => {
     let isMounted = true;
@@ -74,7 +75,8 @@ export default function OrderPage() {
   }, [products]);
 
   const currentItems = products.filter((product) => {
-    const sameCategory = normalizeCategoryId(product.category) === activeCategory;
+    const sameCategory =
+      normalizeCategoryId(product.category) === activeCategory;
     const matchesSearch = String(product.name || "")
       .toLowerCase()
       .includes(search.trim().toLowerCase());
@@ -122,9 +124,13 @@ export default function OrderPage() {
 
     try {
       const authUser = getStoredAuthUser();
-      const createdOrder = await orderApi.createOrder({
+
+      // Prepare order data for bill summary
+      const orderData = {
         tableId: decodedTableId,
+        tableName: selectedTable?.name || `Bàn ${decodedTableId}`,
         customerName: customer.name || "Khách lẻ",
+        customerPhone: customer.phone || "",
         items: cart.map((item) => ({
           productId: item.id,
           productName: item.name,
@@ -136,17 +142,11 @@ export default function OrderPage() {
         discount: safeDiscount,
         grandTotal: total,
         createdBy: authUser?.username || "staff",
-      });
+        paymentMethod: paymentMethod,
+      };
 
-      await paymentApi.processPayment({
-        provider: "cash",
-        orderId: createdOrder.id,
-        amount: createdOrder.grandTotal,
-        transactionId: `cash_${createdOrder.id}_${Date.now()}`,
-      });
-
-      setCart([]);
-      navigate("/order-history");
+      // Navigate to bill summary with order data
+      navigate("/bill-summary", { state: { orderData } });
     } catch (err) {
       setError(err.details || err.code || err.message);
     } finally {
@@ -264,7 +264,9 @@ export default function OrderPage() {
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">#</span>
-                  <span className="font-semibold">Giỏ hàng ({cart.length})</span>
+                  <span className="font-semibold">
+                    Giỏ hàng ({cart.length})
+                  </span>
                 </div>
                 <button
                   onClick={() => setCart([])}
@@ -286,7 +288,8 @@ export default function OrderPage() {
                 <div className="text-left">
                   <p className="font-medium text-lg">Khách hàng</p>
                   <p className="text-sm text-gray-500">
-                    {customer.name || "Khách lẻ"}
+                    {customer.name || "Khách lẻ"}{" "}
+                    {customer.phone ? `- ${customer.phone}` : ""}
                   </p>
                 </div>
               </button>
@@ -312,7 +315,10 @@ export default function OrderPage() {
                 </p>
               ) : (
                 cart.map((item) => (
-                  <div key={item.id} className="flex justify-between py-4 border-b gap-4">
+                  <div
+                    key={item.id}
+                    className="flex justify-between py-4 border-b gap-4"
+                  >
                     <div>
                       <p className="font-medium">{item.name}</p>
                       <div className="flex items-center gap-2 mt-2">
@@ -350,17 +356,42 @@ export default function OrderPage() {
                   <span>-{formatCurrency(safeDiscount)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-xl font-bold border-t pt-4 mt-3">
+              <div className="flex justify-between text-xl font-bold border-t pt-4 mt-3 mb-4">
                 <span>Tổng cộng</span>
                 <span>{formatCurrency(total)}</span>
+              </div>
+
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setPaymentMethod("cash")}
+                  className={`flex-1 py-3 rounded-2xl font-medium border-2 transition ${
+                    paymentMethod === "cash"
+                      ? "border-blue-600 bg-blue-50 text-blue-700"
+                      : "border-gray-200 text-gray-500 hover:bg-gray-100"
+                  }`}
+                >
+                  Tiền mặt
+                </button>
+                <button
+                  onClick={() => setPaymentMethod("transfer")}
+                  className={`flex-1 py-3 rounded-2xl font-medium border-2 transition ${
+                    paymentMethod === "transfer"
+                      ? "border-blue-600 bg-blue-50 text-blue-700"
+                      : "border-gray-200 text-gray-500 hover:bg-gray-100"
+                  }`}
+                >
+                  Chuyển khoản
+                </button>
               </div>
 
               <button
                 onClick={handleCheckout}
                 disabled={cart.length === 0 || isSubmitting}
-                className="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-5 rounded-3xl font-bold text-lg transition"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-2xl font-bold text-lg transition"
               >
-                {isSubmitting ? "Đang thanh toán..." : "Thanh toán tiền mặt"}
+                {isSubmitting
+                  ? "Đang xử lý..."
+                  : `Thanh toán ${paymentMethod === "cash" ? "tiền mặt" : "chuyển khoản"}`}
               </button>
             </div>
           </div>
@@ -406,15 +437,15 @@ export default function OrderPage() {
             <div className="flex border-t">
               <button
                 onClick={() => setShowCustomerModal(false)}
-                className="flex-1 py-5 font-medium text-gray-600 border-r"
+                className="flex-1 py-5 font-medium text-gray-600 border-r hover:bg-gray-50 rounded-bl-3xl"
               >
-                Hủy
+                Đóng
               </button>
               <button
                 onClick={() => setShowCustomerModal(false)}
-                className="flex-1 py-5 bg-blue-600 text-white font-medium"
+                className="flex-1 py-5 bg-blue-600 text-white font-medium hover:bg-blue-700 rounded-br-3xl"
               >
-                Lưu
+                Xong
               </button>
             </div>
           </div>

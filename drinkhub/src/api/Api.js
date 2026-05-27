@@ -854,6 +854,37 @@ export const accountApi = {
 };
 
 /* =========================
+ * SHIFT API
+ * ========================= */
+
+export const shiftApi = {
+  getShifts(filters = {}) {
+    return request("GET_SHIFTS", filters);
+  },
+
+  createShift(payload) {
+    return request("CREATE_SHIFT", payload);
+  },
+
+  closeShift(shiftId, payload) {
+    return request("CLOSE_SHIFT", {
+      shiftId,
+      ...payload,
+    });
+  },
+};
+
+/* =========================
+ * REPORT API
+ * ========================= */
+
+export const reportApi = {
+  getReport(filters = {}) {
+    return request("GET_REPORT", filters);
+  },
+};
+
+/* =========================
  * POLLING SYSTEM
  * ========================= */
 

@@ -102,9 +102,9 @@ export default function DiscountManagementPage() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/")}
-              className="px-4 py-2 rounded-xl bg-white border border-gray-200 shadow-sm hover:bg-gray-100"
+              className="text-3xl text-gray-600 hover:text-gray-900"
             >
-              Back
+              &larr;
             </button>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
@@ -205,19 +205,40 @@ export default function DiscountManagementPage() {
               {editingId ? "Sua ma giam gia" : "Them ma giam gia"}
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <input required className="border rounded-xl px-4 py-3" placeholder="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-              <select className="border rounded-xl px-4 py-3" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                <option value="fixed">fixed</option>
-                <option value="percent">percent</option>
-              </select>
-              <input type="number" className="border rounded-xl px-4 py-3" placeholder="Gia tri" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-              <input type="number" className="border rounded-xl px-4 py-3" placeholder="Don toi thieu" value={form.minOrderValue} onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} />
-              <input type="number" className="border rounded-xl px-4 py-3" placeholder="Giam toi da" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} />
-              <select className="border rounded-xl px-4 py-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="INACTIVE">INACTIVE</option>
-              </select>
-              <input type="date" className="border rounded-xl px-4 py-3 col-span-2" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Code giam gia</span>
+                <input required className="w-full border rounded-xl px-4 py-3" placeholder="Nhap code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Loai giam gia</span>
+                <select className="w-full border rounded-xl px-4 py-3" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value="fixed">fixed</option>
+                  <option value="percent">percent</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Gia tri giam</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap gia tri" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Gia tri don hang toi thieu</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap gia toi thieu" value={form.minOrderValue} onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Muc giam toi da</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap muc giam toi da" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Trang thai</span>
+                <select className="w-full border rounded-xl px-4 py-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="INACTIVE">INACTIVE</option>
+                </select>
+              </label>
+              <label className="space-y-1 col-span-2">
+                <span className="text-sm font-medium text-gray-600">Ngay het han</span>
+                <input type="date" className="w-full border rounded-xl px-4 py-3" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
+              </label>
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setIsModalOpen(false)} className="px-5 py-3 rounded-xl bg-gray-100">Huy</button>

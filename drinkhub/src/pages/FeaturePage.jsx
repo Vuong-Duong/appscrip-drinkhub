@@ -13,9 +13,9 @@ export default function FeaturePage() {
         <div className="flex items-center gap-4 mb-8">
           <button
             onClick={() => navigate("/")}
-            className="px-4 py-2 rounded-xl bg-white border border-gray-200 shadow-sm hover:bg-gray-100"
+            className="text-3xl text-gray-600 hover:text-gray-900"
           >
-            Back
+            &larr;
           </button>
           <h1 className="text-2xl font-bold text-gray-900">
             Tinh nang {featureId}

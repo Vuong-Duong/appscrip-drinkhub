@@ -10,7 +10,11 @@ import {
 import HomePage from "./pages/HomePage";
 import KhuVucPage from "./pages/KhuVucPage";
 import OrderPageInKhuVuc from "./pages/OrderPageInKhuVuc";
+import BillSummaryPage from "./pages/BillSummaryPage";
 import OrderHistoryPage from "./pages/OrderHistoryPage";
+import DashboardPage from "./pages/DashboardPage";
+import ShiftManagementPage from "./pages/ShiftManagementPage";
+import ShiftDetailPage from "./pages/ShiftDetailPage";
 import Login from "./pages/Login";
 import FeaturePage from "./pages/FeaturePage";
 import MenuManagementPage from "./pages/MenuManagementPage";
@@ -90,11 +94,18 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/khu-vuc" element={<KhuVucPage />} />
           <Route path="/order/:tableId" element={<OrderPageInKhuVuc />} />
+          <Route path="/bill-summary" element={<BillSummaryPage />} />
           <Route path="/order-history" element={<OrderHistoryPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/shift" element={<ShiftManagementPage />} />
+          <Route path="/shift/:shiftId" element={<ShiftDetailPage />} />
           <Route path="/feature/:featureId" element={<FeaturePage />} />
           <Route element={<AdminRoute />}>
             <Route path="/admin/menu" element={<MenuManagementPage />} />
-            <Route path="/admin/discount" element={<DiscountManagementPage />} />
+            <Route
+              path="/admin/discount"
+              element={<DiscountManagementPage />}
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

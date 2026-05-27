@@ -113,9 +113,9 @@ export default function MenuManagementPage() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/")}
-              className="px-4 py-2 rounded-xl bg-white border border-gray-200 shadow-sm hover:bg-gray-100"
+              className="text-3xl text-gray-600 hover:text-gray-900"
             >
-              Back
+              &larr;
             </button>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
@@ -234,16 +234,37 @@ export default function MenuManagementPage() {
               {editingId ? "Sua san pham" : "Them san pham"}
             </h2>
             <div className="grid grid-cols-2 gap-4">
-              <input required className="border rounded-xl px-4 py-3" placeholder="Ten" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              <input className="border rounded-xl px-4 py-3" placeholder="Danh muc" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
-              <input type="number" className="border rounded-xl px-4 py-3" placeholder="Gia ban" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-              <input type="number" className="border rounded-xl px-4 py-3" placeholder="Gia von" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
-              <input type="number" className="border rounded-xl px-4 py-3" placeholder="Ton kho" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
-              <select className="border rounded-xl px-4 py-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="INACTIVE">INACTIVE</option>
-              </select>
-              <input className="border rounded-xl px-4 py-3 col-span-2" placeholder="URL hinh anh" value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} />
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Ten san pham</span>
+                <input required className="w-full border rounded-xl px-4 py-3" placeholder="Nhap ten san pham" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Danh muc</span>
+                <input className="w-full border rounded-xl px-4 py-3" placeholder="Nhap danh muc" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Gia ban</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap gia ban" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Gia von</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap gia von" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">So luong ton kho</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap so luong" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">Trang thai</span>
+                <select className="w-full border rounded-xl px-4 py-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option value="ACTIVE">ACTIVE</option>
+                  <option value="INACTIVE">INACTIVE</option>
+                </select>
+              </label>
+              <label className="space-y-1 col-span-2">
+                <span className="text-sm font-medium text-gray-600">URL hinh anh</span>
+                <input className="w-full border rounded-xl px-4 py-3" placeholder="Nhap URL hinh anh" value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} />
+              </label>
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={() => setIsModalOpen(false)} className="px-5 py-3 rounded-xl bg-gray-100">Huy</button>

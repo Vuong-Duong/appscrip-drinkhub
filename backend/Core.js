@@ -38,6 +38,7 @@ const SHEET_NAME = Object.freeze({
   LOG: "Log",
   STORE_INFO: "Thông tin quán",
   COUPON: "Khuyến mãi",
+  SHIFT: "Ca",
 });
 
 const SHEET_SCHEMA = Object.freeze({
@@ -133,6 +134,19 @@ const SHEET_SCHEMA = Object.freeze({
     MAX_DISCOUNT: 5,
     STATUS: 6,
     EXPIRES_AT: 7,
+  }),
+  SHIFT: Object.freeze({
+    ID: 0,
+    STAFF_NAME: 1,
+    START_TIME: 2,
+    END_TIME: 3,
+    OPENING_CASH: 4,
+    TOTAL_REVENUE: 5,
+    TOTAL_PAID: 6,
+    CASH_IN_REGISTER: 7,
+    STATUS: 8,
+    CREATED_AT: 9,
+    CLOSED_AT: 10,
   }),
 });
 
