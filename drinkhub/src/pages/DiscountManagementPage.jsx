@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
-import { discountApi } from "../api/Api";
+import appStore from "../services/AppStore";
+import CrudService from "../services/CrudService";
 import { getStoredAuthUser } from "../utils/auth";
 import { formatCurrency } from "../utils/helpers";
 
 const emptyDiscount = {
   code: "",
   type: "fixed",
-  value: 0,
-  minOrderValue: 0,
-  maxDiscount: 0,
+  value: "",
+  minOrderValue: "",
+  maxDiscount: "",
   status: "ACTIVE",
   expiresAt: "",
 };
@@ -18,27 +19,26 @@ const emptyDiscount = {
 export default function DiscountManagementPage() {
   const navigate = useNavigate();
   const user = getStoredAuthUser();
-  const [discounts, setDiscounts] = useState([]);
+  const [storeState, setStoreState] = useState(appStore.getState());
   const [form, setForm] = useState(emptyDiscount);
   const [editingId, setEditingId] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    discountApi
-      .getDiscounts()
-      .then((data) => {
-        setDiscounts(Array.isArray(data) ? data : []);
-        setError("");
-      })
-      .catch((err) => setError(err.details || err.code || err.message))
-      .finally(() => setIsLoading(false));
+    const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
+    });
+    return unsubscribe;
   }, []);
+
+  const discounts = storeState.discounts || [];
+  const isLoading = storeState.loading;
 
   const openCreateModal = () => {
     setEditingId("");
     setForm(emptyDiscount);
+    setError("");
     setIsModalOpen(true);
   };
 
@@ -47,44 +47,73 @@ export default function DiscountManagementPage() {
     setForm({
       code: discount.code || "",
       type: discount.type || "fixed",
-      value: discount.value || 0,
-      minOrderValue: discount.minOrderValue || 0,
-      maxDiscount: discount.maxDiscount || 0,
+      value: discount.value !== undefined && discount.value !== null ? discount.value : "",
+      minOrderValue: discount.minOrderValue !== undefined && discount.minOrderValue !== null ? discount.minOrderValue : "",
+      maxDiscount: discount.maxDiscount !== undefined && discount.maxDiscount !== null ? discount.maxDiscount : "",
       status: discount.status || "ACTIVE",
       expiresAt: discount.expiresAt || "",
     });
+    setError("");
     setIsModalOpen(true);
   };
 
   const handleSave = async (event) => {
     event.preventDefault();
-    const payload = { ...form, userRole: user?.role };
+
+    const trimmedCode = (form.code || "").trim();
+    const valueStr = String(form.value !== undefined && form.value !== null ? form.value : "").trim();
+    const minOrderValueStr = String(form.minOrderValue !== undefined && form.minOrderValue !== null ? form.minOrderValue : "").trim();
+    const maxDiscountStr = String(form.maxDiscount !== undefined && form.maxDiscount !== null ? form.maxDiscount : "").trim();
+
+    if (!trimmedCode) {
+      setError("Vui lòng nhập mã giảm giá");
+      return;
+    }
+    if (valueStr === "" || isNaN(Number(valueStr)) || Number(valueStr) < 0) {
+      setError("Vui lòng nhập giá trị giảm hợp lệ (số không âm)");
+      return;
+    }
+    if (minOrderValueStr === "" || isNaN(Number(minOrderValueStr)) || Number(minOrderValueStr) < 0) {
+      setError("Vui lòng nhập giá trị đơn hàng tối thiểu hợp lệ (số không âm)");
+      return;
+    }
+    if (maxDiscountStr === "" || isNaN(Number(maxDiscountStr)) || Number(maxDiscountStr) < 0) {
+      setError("Vui lòng nhập mức giảm tối đa hợp lệ (số không âm)");
+      return;
+    }
+
+    const payload = {
+      code: trimmedCode,
+      type: form.type,
+      value: parseInt(valueStr, 10) || 0,
+      minOrderValue: parseInt(minOrderValueStr, 10) || 0,
+      maxDiscount: parseInt(maxDiscountStr, 10) || 0,
+      status: form.status,
+      expiresAt: (form.expiresAt || "").trim(),
+    };
 
     try {
       if (editingId) {
-        const updated = await discountApi.updateDiscount(editingId, payload);
-        setDiscounts((current) =>
-          current.map((item) => (item.id === editingId ? updated : item)),
-        );
+        const updated = { ...payload, id: editingId };
+        await CrudService.update("discounts", updated);
       } else {
-        const created = await discountApi.createDiscount(payload);
-        setDiscounts((current) => [created, ...current]);
+        const created = { ...payload, id: `discount-${Date.now()}` };
+        await CrudService.create("discounts", created);
       }
       setIsModalOpen(false);
       setError("");
     } catch (err) {
-      setError(err.details || err.code || err.message);
+      setError(err.message || "Không lưu được mã giảm giá");
     }
   };
 
   const handleDelete = async (discountId) => {
-    if (!window.confirm("Xoa ma giam gia nay?")) return;
+    if (!window.confirm("Xoá mã giảm giá này?")) return;
 
     try {
-      await discountApi.deleteDiscount(discountId, user?.role);
-      setDiscounts((current) => current.filter((item) => item.id !== discountId));
+      await CrudService.delete("discounts", discountId);
     } catch (err) {
-      setError(err.details || err.code || err.message);
+      setError(err.message || "Xoá mã giảm giá thất bại");
     }
   };
 
@@ -108,10 +137,10 @@ export default function DiscountManagementPage() {
             </button>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">
-                Quan ly Chuong trinh
+                Quản lý Chương trình
               </h1>
               <p className="text-sm text-gray-500">
-                CRUD ma giam gia theo sheet Khuyen mai
+                Quản lý mã giảm giá theo chương trình Khuyến mãi
               </p>
             </div>
           </div>
@@ -119,14 +148,14 @@ export default function DiscountManagementPage() {
             onClick={openCreateModal}
             className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
           >
-            Them ma giam gia
+            Thêm mã giảm giá
           </button>
         </div>
 
         {error && <div className="mb-4 text-red-600">{error}</div>}
 
         {isLoading ? (
-          <div className="text-center py-16 text-gray-500">Dang tai...</div>
+          <div className="text-center py-16 text-gray-500">Đang tải...</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {discounts
@@ -150,27 +179,27 @@ export default function DiscountManagementPage() {
 
                   <div className="grid grid-cols-2 gap-3 text-sm mt-5">
                     <div>
-                      <p className="text-gray-400">Loai</p>
+                      <p className="text-gray-400">Loại</p>
                       <p className="font-semibold">{discount.type}</p>
                     </div>
                     <div>
-                      <p className="text-gray-400">Gia tri</p>
+                      <p className="text-gray-400">Giá trị</p>
                       <p className="font-semibold">{formatDiscountValue(discount)}</p>
                     </div>
                     <div>
-                      <p className="text-gray-400">Don toi thieu</p>
+                      <p className="text-gray-400">Đơn tối thiểu</p>
                       <p className="font-semibold">
                         {formatCurrency(discount.minOrderValue)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-gray-400">Giam toi da</p>
+                      <p className="text-gray-400">Giảm tối đa</p>
                       <p className="font-semibold">
                         {formatCurrency(discount.maxDiscount)}
                       </p>
                     </div>
                     <div className="col-span-2">
-                      <p className="text-gray-400">Het han</p>
+                      <p className="text-gray-400">Hết hạn</p>
                       <p className="font-semibold">{discount.expiresAt || "--"}</p>
                     </div>
                   </div>
@@ -180,13 +209,13 @@ export default function DiscountManagementPage() {
                       onClick={() => openEditModal(discount)}
                       className="flex-1 py-2 rounded-xl bg-blue-50 text-blue-700 font-medium"
                     >
-                      Sua
+                      Sửa
                     </button>
                     <button
                       onClick={() => handleDelete(discount.id)}
                       className="flex-1 py-2 rounded-xl bg-red-50 text-red-700 font-medium"
                     >
-                      Xoa
+                      Xoá
                     </button>
                   </div>
                 </div>
@@ -202,47 +231,52 @@ export default function DiscountManagementPage() {
             className="bg-white rounded-2xl w-full max-w-2xl p-6 space-y-4"
           >
             <h2 className="text-xl font-bold">
-              {editingId ? "Sua ma giam gia" : "Them ma giam gia"}
+              {editingId ? "Sửa mã giảm giá" : "Thêm mã giảm giá"}
             </h2>
+            {error && (
+              <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">
+                {error}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">Code giam gia</span>
-                <input required className="w-full border rounded-xl px-4 py-3" placeholder="Nhap code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+                <span className="text-sm font-medium text-gray-600">Mã giảm giá</span>
+                <input required className="w-full border rounded-xl px-4 py-3" placeholder="Nhập mã" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
               </label>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">Loai giam gia</span>
+                <span className="text-sm font-medium text-gray-600">Loại giảm giá</span>
                 <select className="w-full border rounded-xl px-4 py-3" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
                   <option value="fixed">fixed</option>
                   <option value="percent">percent</option>
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">Gia tri giam</span>
-                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap gia tri" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+                <span className="text-sm font-medium text-gray-600">Giá trị giảm</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhập giá trị" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
               </label>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">Gia tri don hang toi thieu</span>
-                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap gia toi thieu" value={form.minOrderValue} onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} />
+                <span className="text-sm font-medium text-gray-600">Giá trị đơn hàng tối thiểu</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhập giá tối thiểu" value={form.minOrderValue} onChange={(e) => setForm({ ...form, minOrderValue: e.target.value })} />
               </label>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">Muc giam toi da</span>
-                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhap muc giam toi da" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} />
+                <span className="text-sm font-medium text-gray-600">Mức giảm tối đa</span>
+                <input type="number" className="w-full border rounded-xl px-4 py-3" placeholder="Nhập mức giảm tối đa" value={form.maxDiscount} onChange={(e) => setForm({ ...form, maxDiscount: e.target.value })} />
               </label>
               <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">Trang thai</span>
+                <span className="text-sm font-medium text-gray-600">Trạng thái</span>
                 <select className="w-full border rounded-xl px-4 py-3" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                   <option value="ACTIVE">ACTIVE</option>
                   <option value="INACTIVE">INACTIVE</option>
                 </select>
               </label>
               <label className="space-y-1 col-span-2">
-                <span className="text-sm font-medium text-gray-600">Ngay het han</span>
+                <span className="text-sm font-medium text-gray-600">Ngày hết hạn</span>
                 <input type="date" className="w-full border rounded-xl px-4 py-3" value={form.expiresAt} onChange={(e) => setForm({ ...form, expiresAt: e.target.value })} />
               </label>
             </div>
             <div className="flex justify-end gap-3">
-              <button type="button" onClick={() => setIsModalOpen(false)} className="px-5 py-3 rounded-xl bg-gray-100">Huy</button>
-              <button type="submit" className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold">Luu</button>
+              <button type="button" onClick={() => { setIsModalOpen(false); setError(""); }} className="px-5 py-3 rounded-xl bg-gray-100">Huỷ</button>
+              <button type="submit" className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold">Lưu</button>
             </div>
           </form>
         </div>

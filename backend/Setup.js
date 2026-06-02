@@ -109,6 +109,22 @@ const SHEET_SETUP_DEFINITIONS_ = [
     headers: ["Khóa", "Giá trị"],
   },
   {
+    name: SHEET_NAME.SHIFT,
+    headers: [
+      "Mã ca",
+      "Tên nhân viên",
+      "Thời gian bắt đầu",
+      "Thời gian kết thúc",
+      "Tiền mặt mở ca",
+      "Tổng doanh thu",
+      "Tổng thanh toán",
+      "Tiền mặt trong két",
+      "Trạng thái",
+      "Ngày tạo",
+      "Ngày đóng",
+    ],
+  },
+  {
     name: SHEET_NAME.COUPON,
     headers: [
       "Mã",
@@ -179,6 +195,43 @@ const applySheetHeaders_ = (sheet, headers, sheetJustCreated) => {
   return { headersApplied: false, skipped: "Đã có tiêu đề hoặc dữ liệu ở hàng 1" };
 };
 
+/** Đảm bảo các khóa STORE_NAME, ADDRESS, STORE_ID tồn tại trong sheet Thông tin quán */
+const ensureStoreInfoKeys_ = (sheet) => {
+  const rows = sheet.getDataRange().getValues();
+  const existingKeys = new Set();
+
+  for (let i = 1; i < rows.length; i++) {
+    const key = trimSafe_(rows[i][0]);
+    if (key) {
+      existingKeys.add(key);
+    }
+  }
+
+  const requiredKeys = [
+    { key: "STORE_NAME", defaultValue: "DrinkHub Shop" },
+    { key: "ADDRESS", defaultValue: "Chưa có địa chỉ" },
+    { key: "STORE_ID", defaultValue: "POS_001" },
+  ];
+
+  requiredKeys.forEach((item) => {
+    if (!existingKeys.has(item.key)) {
+      if (item.key === "STORE_NAME" && existingKeys.has("Tên")) {
+        // Tự động đổi "Tên" thành "STORE_NAME" để giữ lại dữ liệu cũ của user
+        for (let i = 1; i < rows.length; i++) {
+          if (trimSafe_(rows[i][0]) === "Tên") {
+            sheet.getRange(i + 1, 1).setValue("STORE_NAME");
+            existingKeys.delete("Tên");
+            existingKeys.add("STORE_NAME");
+            break;
+          }
+        }
+      } else {
+        sheet.appendRow([item.key, item.defaultValue]);
+      }
+    }
+  });
+};
+
 /**
  * Tạo sheet thiếu + ghi tiêu đề tiếng Việt (hàng 1).
  * Gọi tự động trước mọi thao tác đọc/ghi sheet; chạy một lần mỗi execution.
@@ -209,6 +262,12 @@ const ensureSpreadsheetSetup_ = () => {
       invalidateSheetCache_(def.name);
     } else if (result.skipped) {
       report.skipped.push({ name: def.name, reason: result.skipped });
+    }
+
+    // Đảm bảo cấu trúc key-value của store info
+    if (def.name === SHEET_NAME.STORE_INFO) {
+      ensureStoreInfoKeys_(sheet);
+      invalidateSheetCache_(SHEET_NAME.STORE_INFO);
     }
   });
 

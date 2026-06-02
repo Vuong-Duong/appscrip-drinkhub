@@ -1,18 +1,18 @@
 import { useNavigate } from "react-router-dom";
 
 const features = [
-  { num: "1", title: "Quan ly ca", icon: "⏰", route: "/shift" },
-  { num: "2", title: "Bao cao", icon: "📊", route: "/dashboard" },
-  { num: "3", title: "Quan ly ket noi", icon: "🔗", route: "/feature/2" },
-  { num: "4", title: "Quan ly dat coc", icon: "💰", route: "/feature/4" },
-  { num: "5", title: "Phuong thuc thanh toan", icon: "💳", route: "/feature/6" },
-  { num: "6", title: "Quan ly may in", icon: "🖨️", route: "/feature/7" },
-  { num: "7", title: "Quan ly khu vuc", icon: "🗺️", route: "/khu-vuc" },
-  { num: "8", title: "Bao het mon", icon: "🚫", route: "/feature/10" },
-  { num: "9", title: "Cau hinh man hinh 2", icon: "🖥️", route: "/feature/11" },
-  { num: "10", title: "Nhat ky Order", icon: "📋", route: "/order-history" },
-  { num: "11", title: "Xuat ma vach", icon: "🏷️", route: "/feature/14" },
-  { num: "12", title: "Quan ly thiet bi", icon: "📟", route: "/feature/16" },
+  { num: "1", title: "Quản lý ca", icon: "⏰", route: "/shift" },
+  { num: "2", title: "Báo cáo", icon: "📊", route: "/dashboard" },
+  { num: "3", title: "Quản lý kết nối", icon: "🔗", route: "/feature/2" },
+  { num: "4", title: "Quản lý đặt cọc", icon: "💰", route: "/feature/4" },
+  { num: "5", title: "Phương thức thanh toán", icon: "💳", route: "/feature/6" },
+  { num: "6", title: "Quản lý máy in", icon: "🖨️", route: "/feature/7" },
+  { num: "7", title: "Quản lý khu vực", icon: "🗺️", route: "/khu-vuc" },
+  { num: "8", title: "Báo hết món", icon: "🚫", route: "/feature/10" },
+  { num: "9", title: "Cấu hình màn hình 2", icon: "🖥️", route: "/feature/11" },
+  { num: "10", title: "Nhật ký Order", icon: "📋", route: "/order-history" },
+  { num: "11", title: "Xuất mã vạch", icon: "🏷️", route: "/feature/14" },
+  { num: "12", title: "Quản lý thiết bị", icon: "📟", route: "/feature/16" },
 ];
 
 export default function FeatureGridMain() {
@@ -34,7 +34,7 @@ export default function FeatureGridMain() {
 
               <div className="flex-1">
                 <p className="text-sm text-gray-400 font-medium">
-                  Tinh nang
+                  Tính năng
                 </p>
 
                 <p className="font-semibold text-gray-800 text-base leading-snug mt-1">

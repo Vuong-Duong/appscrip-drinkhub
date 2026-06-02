@@ -314,8 +314,14 @@ const findRowById_ = (sheetName, id, idColumnIndex = 0) => {
   return null;
 };
 
+let IS_SCRIPT_LOCKED_ = false;
+
 const withLock_ = (lockName, callback) => {
   if (typeof callback !== "function") throw new Error("LOCK_CALLBACK_REQUIRED");
+
+  if (IS_SCRIPT_LOCKED_) {
+    return callback();
+  }
 
   if (typeof LockService === "undefined") {
     return callback();
@@ -323,9 +329,11 @@ const withLock_ = (lockName, callback) => {
 
   const lock = LockService.getScriptLock();
   lock.waitLock(APP_CONFIG.LOCK_WAIT_MS);
+  IS_SCRIPT_LOCKED_ = true;
   try {
     return callback();
   } finally {
+    IS_SCRIPT_LOCKED_ = false;
     lock.releaseLock();
   }
 };

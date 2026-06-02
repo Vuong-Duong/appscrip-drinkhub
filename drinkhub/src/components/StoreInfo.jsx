@@ -1,32 +1,17 @@
 import { useEffect, useState } from "react";
-import { storeApi } from "../api/Api";
+import appStore from "../services/AppStore";
 
 export default function StoreInfo() {
-  const [storeInfo, setStoreInfo] = useState(null);
-  const [error, setError] = useState("");
+  const [storeInfo, setStoreInfo] = useState(() => appStore.get("settings") || {});
 
   useEffect(() => {
-    let isMounted = true;
-
-    storeApi
-      .getStoreInfo()
-      .then((data) => {
-        if (isMounted) {
-          setStoreInfo(data);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.details || err.code || err.message);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
+    const unsubscribe = appStore.subscribe((state) => {
+      setStoreInfo(state.settings || {});
+    });
+    return unsubscribe;
   }, []);
 
-  const storeName = storeInfo?.STORE_NAME || "Đang tải thông tin quán";
+  const storeName = storeInfo?.STORE_NAME || "DrinkHub - Quán Nước";
   const address = storeInfo?.ADDRESS || "";
   const storeId = storeInfo?.STORE_ID || "";
 
@@ -37,7 +22,7 @@ export default function StoreInfo() {
           <h2 className="text-xl font-bold text-gray-800">{storeName}</h2>
 
           <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-            {error || address || "Chưa có địa chỉ"}
+            {address || "Chưa có địa chỉ"}
           </p>
         </div>
 

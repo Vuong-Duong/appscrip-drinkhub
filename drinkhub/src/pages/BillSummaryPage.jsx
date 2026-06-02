@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import { orderApi, paymentApi, storeApi } from "../api/Api";
+import { orderApi, paymentApi } from "../api/Api";
 import { formatCurrency } from "../utils/helpers";
 import { printReceipt } from "../utils/receipt";
+import appStore from "../services/AppStore";
 
 export default function BillSummaryPage() {
   const navigate = useNavigate();
@@ -24,41 +25,30 @@ export default function BillSummaryPage() {
     }
   }, [orderData, navigate]);
 
-  // Fetch store info for receipt
+  // Read store info from AppStore
   useEffect(() => {
     if (!orderData) return;
-
-    storeApi
-      .getStoreInfo()
-      .then((data) => {
-        setStoreInfo(data || {});
-      })
-      .catch((err) => {
-        console.error("Failed to fetch store info:", err);
-      });
+    const info = appStore.get("settings") || {};
+    setStoreInfo(info);
   }, [orderData]);
 
   const handlePrintReceipt = () => {
-    if (!createdOrder) {
-      setError("Vui lòng tạo đơn hàng trước khi in hóa đơn");
-      return;
-    }
-
+    const receiptId = createdOrder?.id || orderData?.existingOrderId || `ord_${Date.now()}`;
     setIsPrinting(true);
 
     try {
       const receiptData = {
-        id: createdOrder.id,
-        items: createdOrder.items.map((item) => ({
-          name: item.productName,
+        id: receiptId,
+        items: orderData.items.map((item) => ({
+          name: item.productName || item.name,
           quantity: item.quantity,
-          price: item.unitPrice,
+          price: item.unitPrice || item.price,
           total: item.subtotal,
         })),
-        subtotal: createdOrder.subtotal,
-        discount: createdOrder.discount,
+        subtotal: orderData.subtotal,
+        discount: orderData.discount,
         tax: 0,
-        total: createdOrder.grandTotal,
+        total: orderData.grandTotal,
       };
 
       const tableData = {
@@ -72,10 +62,9 @@ export default function BillSummaryPage() {
         phone: "Số điện thoại",
       };
 
-      printReceipt(receiptData, tableData, restaurantData);
+      printReceipt(receiptData, tableData, restaurantData, "payment_receipt");
 
-      // Log to console that print was sent
-      console.log("Hóa đơn được gửi đến máy in:", createdOrder.id);
+      console.log("Hóa đơn được gửi đến máy in:", receiptId);
     } catch (err) {
       setError("Lỗi khi in hóa đơn: " + (err.message || err));
     } finally {
@@ -89,35 +78,107 @@ export default function BillSummaryPage() {
     setIsProcessing(true);
     setError("");
 
+    const orderId = orderData.existingOrderId || `ord_${Date.now()}`;
+    const amount = orderData.grandTotal;
+
     try {
-      // 1. Create order if not already created
-      let order = createdOrder;
-      if (!order) {
-        order = await orderApi.createOrder(orderData);
-        setCreatedOrder(order);
+      // 1. Instantly update AppStore for SPA-like responsiveness
+      const currentOrders = appStore.get("orders") || [];
+      const existingOrderObj = currentOrders.find((o) => o.id === orderId);
+
+      const closedOrder = {
+        id: orderId,
+        tableId: orderData.tableId,
+        customerName: orderData.customerName,
+        status: "CLOSED",
+        subtotal: orderData.subtotal,
+        discount: orderData.discount,
+        grandTotal: orderData.grandTotal,
+        paymentStatus: "PAID",
+        createdBy: orderData.createdBy,
+        createdAt: existingOrderObj?.createdAt || new Date().toISOString(),
+      };
+
+      if (existingOrderObj) {
+        appStore.set("orders", currentOrders.map(o => o.id === orderId ? closedOrder : o));
+      } else {
+        appStore.set("orders", [...currentOrders, closedOrder]);
       }
 
-      // 2. Process payment
-      const paymentResult = await paymentApi.processPayment({
-        provider: orderData.paymentMethod,
-        orderId: order.id,
-        amount: order.grandTotal,
-        transactionId: `${orderData.paymentMethod}_${order.id}_${Date.now()}`,
-      });
+      // Release table in AppStore
+      const currentTables = appStore.get("tables") || [];
+      appStore.set("tables", currentTables.map(t => 
+        t.id === orderData.tableId ? { ...t, status: "available", currentOrderId: "" } : t
+      ));
 
-      // 3. Log payment info
-      console.log("Payment processed:", paymentResult);
+      // Auto print payment receipt immediately
+      try {
+        const receiptData = {
+          id: orderId,
+          items: orderData.items.map((item) => ({
+            name: item.productName || item.name,
+            quantity: item.quantity,
+            price: item.unitPrice || item.price,
+            total: item.subtotal,
+          })),
+          subtotal: orderData.subtotal,
+          discount: orderData.discount,
+          tax: 0,
+          total: orderData.grandTotal,
+        };
 
-      if (orderData.paymentMethod === "cash") {
-        console.log("Cash payment of", order.grandTotal, "đ recorded for order", order.id);
+        const tableData = {
+          number: orderData.tableName || "N/A",
+          guestCount: "1",
+        };
+
+        const restaurantData = storeInfo || {
+          name: "Quán Nước Quỳnh Anh",
+          address: "Địa chỉ nhà hàng",
+          phone: "Số điện thoại",
+        };
+
+        printReceipt(receiptData, tableData, restaurantData, "payment_receipt");
+      } catch (printErr) {
+        console.error("Auto print failed:", printErr);
       }
 
-      // 4. Redirect to order history
-      navigate("/order-history", { replace: true });
+      // 2. Trigger async background server requests
+      const syncProcess = async () => {
+        try {
+          let finalOrderId = orderId;
+          
+          if (!orderData.existingOrderId) {
+            // New order
+            const serverOrder = await orderApi.createOrder(orderData);
+            finalOrderId = serverOrder.id;
+          } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
+            // Existing order + new items
+            await orderApi.addItems(orderData.existingOrderId, orderData.newCartItems, orderData.discount);
+          }
+
+          // Process payment
+          await paymentApi.processPayment({
+            provider: orderData.paymentMethod,
+            orderId: finalOrderId,
+            amount: amount,
+            transactionId: `${orderData.paymentMethod}_${finalOrderId}_${Date.now()}`,
+          });
+
+          console.log(`Background payment sync succeeded for order: ${finalOrderId}`);
+        } catch (err) {
+          console.error("Failed to sync payment in background:", err);
+          appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
+        }
+      };
+
+      // Run sync in background (fire-and-forget)
+      syncProcess();
+
+      // 3. Redirect to KhuVucPage immediately
+      navigate("/khu-vuc", { replace: true });
     } catch (err) {
-      setError(err.details || err.code || err.message || "Lỗi khi thanh toán");
-      console.error("Payment error:", err);
-    } finally {
+      setError(err.message || "Lỗi khi thanh toán");
       setIsProcessing(false);
     }
   };
@@ -236,51 +297,21 @@ export default function BillSummaryPage() {
 
             {/* Action Buttons */}
             <div className="space-y-3 flex flex-col">
-              {/* Print Button */}
-              <button
-                onClick={handlePrintReceipt}
-                disabled={!createdOrder || isPrinting || isProcessing}
-                className="w-full py-4 rounded-2xl font-bold text-lg border-2 border-blue-600 text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              >
-                {isPrinting ? "Đang in..." : "🖨️ In Hóa Đơn"}
-              </button>
-
-              {/* Payment Confirmation Button */}
               <button
                 onClick={handlePayment}
-                disabled={isProcessing || !createdOrder}
-                className="w-full py-4 rounded-2xl font-bold text-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all"
+                disabled={isProcessing}
+                className="w-full py-4 rounded-2xl font-bold text-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md"
               >
-                {isProcessing ? "Đang xử lý..." : `💰 Xác nhận thanh toán`}
+                {isProcessing ? "Đang xử lý..." : "💰 Thanh toán & Hoàn tất"}
               </button>
 
-              {/* Create Order & Print (Combined) */}
-              {!createdOrder && (
+              {createdOrder && (
                 <button
-                  onClick={async () => {
-                    if (isProcessing) return;
-                    setIsProcessing(true);
-                    setError("");
-                    try {
-                      const order = await orderApi.createOrder(orderData);
-                      setCreatedOrder(order);
-                      setError("");
-                      // Auto print after creating order
-                      setTimeout(() => {
-                        handlePrintReceipt();
-                      }, 500);
-                    } catch (err) {
-                      setError(
-                        err.details || err.code || err.message || "Lỗi khi tạo đơn"
-                      );
-                    } finally {
-                      setIsProcessing(false);
-                    }
-                  }}
-                  disabled={isProcessing}
-                  className="w-full py-4 rounded-2xl font-bold text-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all"
+                  onClick={handlePrintReceipt}
+                  disabled={isPrinting || isProcessing}
+                  className="w-full py-4 rounded-2xl font-bold text-lg border-2 border-blue-600 text-blue-600 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                  {isProcessing ? "Đang tạo..." : "✅ Tạo & In HĐ"}
+                  {isPrinting ? "Đang in..." : "🖨️ In Hóa Đơn"}
                 </button>
               )}
 
@@ -293,6 +324,7 @@ export default function BillSummaryPage() {
                 ← Quay lại
               </button>
             </div>
+
 
             {/* Order Status */}
             {createdOrder && (

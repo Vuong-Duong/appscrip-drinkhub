@@ -308,6 +308,22 @@ const handleGetReport_ = withTryCatch_((payload) => {
   return ok_(getReportData(payload || {}));
 });
 
+const handleAddItems_ = withTryCatch_((payload) => {
+  const missing = requireFields_(payload, ["orderId", "items"]);
+  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_(addItemsToOrder(
+    trimSafe_(payload.orderId),
+    normalizeOrderPayloadForApi_({ items: payload.items }).items,
+    payload.discount,
+  ));
+});
+
+const handleGetOrderByTicket_ = withTryCatch_((payload) => {
+  const missing = requireFields_(payload, ["ticketId"]);
+  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_(getOrderByTicketId(trimSafe_(payload.ticketId)));
+});
+
 const handlePaymentAndroid_ = withTryCatch_((payload) => {
   const missing = requireFields_(payload, ["message"]);
   if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
@@ -320,6 +336,20 @@ const handlePaymentAndroid_ = withTryCatch_((payload) => {
       timestamp: payload.timestamp || toIsoString_(new Date()),
     }),
   );
+});
+
+const handleUploadImage_ = withTryCatch_((payload) => {
+  const missing = requireFields_(payload, ["base64", "fileName"]);
+  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_(uploadImage(payload.base64, payload.fileName));
+});
+
+const handleGetAllDataForCache_ = withTryCatch_(() => {
+  return ok_(getAllDataForCache());
+});
+
+const handleBatchCRUDWithSync_ = withTryCatch_((payload) => {
+  return ok_(batchCRUDWithSync(payload));
 });
 
 // =========================
@@ -354,6 +384,11 @@ const ACTION_HANDLERS = Object.freeze({
   CREATE_SHIFT: handleCreateShift_,
   CLOSE_SHIFT: handleCloseShift_,
   GET_REPORT: handleGetReport_,
+  ADD_ITEMS_TO_ORDER: handleAddItems_,
+  GET_ORDER_BY_TICKET: handleGetOrderByTicket_,
+  UPLOAD_IMAGE: handleUploadImage_,
+  GET_ALL_DATA_FOR_CACHE: handleGetAllDataForCache_,
+  BATCH_CRUD_WITH_SYNC: handleBatchCRUDWithSync_,
 });
 
 // =========================

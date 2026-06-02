@@ -142,3 +142,31 @@ function generateReceiptHTML(order, table, restaurant) {
     </div>
   `;
 }
+
+// Convert Google Drive view URLs to direct CDN URLs that work inside Apps Script iframes
+export const getDirectImageUrl = (url) => {
+  if (!url) return "";
+  
+  // Check if it is a Google Drive URL
+  if (url.includes("drive.google.com") || url.includes("docs.google.com")) {
+    let fileId = "";
+    
+    // Format 1: uc?export=view&id=FILE_ID or open?id=FILE_ID or uc?id=FILE_ID
+    const idMatch = url.match(/[?&]id=([^&]+)/);
+    if (idMatch) {
+      fileId = idMatch[1];
+    } else {
+      // Format 2: file/d/FILE_ID/view
+      const dMatch = url.match(/\/file\/d\/([^/]+)/);
+      if (dMatch) {
+        fileId = dMatch[1];
+      }
+    }
+    
+    if (fileId) {
+      return `https://lh3.googleusercontent.com/d/${fileId}`;
+    }
+  }
+  
+  return url;
+};

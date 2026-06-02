@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
-import { orderApi, paymentApi, productApi, tableApi } from "../api/Api";
-import { formatCurrency } from "../utils/helpers";
+import { orderApi } from "../api/Api";
+import { formatCurrency, getDirectImageUrl } from "../utils/helpers";
 import { getStoredAuthUser } from "../utils/auth";
+import { printReceipt } from "../utils/receipt";
+import appStore from "../services/AppStore";
 
 const normalizeCategoryId = (value) =>
   String(value || "khac")
@@ -16,6 +18,7 @@ export default function OrderPage() {
   const { tableId } = useParams();
   const decodedTableId = decodeURIComponent(tableId || "");
 
+  const [storeState, setStoreState] = useState(appStore.getState());
   const [products, setProducts] = useState([]);
   const [tables, setTables] = useState([]);
   const [cart, setCart] = useState([]);
@@ -29,38 +32,51 @@ export default function OrderPage() {
   const [discount, setDiscount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("cash");
 
+  const storeInfo = storeState.settings || {};
+
+  // Subscribe to AppStore changes
   useEffect(() => {
-    let isMounted = true;
+    const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
+      const nextProducts = Array.isArray(state.products) ? state.products : [];
+      setProducts(nextProducts);
+      setTables(Array.isArray(state.tables) ? state.tables : []);
+      setIsLoading(state.loading);
+    });
 
-    Promise.all([productApi.getProducts(), tableApi.getTables()])
-      .then(([productData, tableData]) => {
-        if (!isMounted) return;
-        const nextProducts = Array.isArray(productData) ? productData : [];
-        setProducts(nextProducts);
-        setTables(Array.isArray(tableData) ? tableData : []);
-        setActiveCategory((current) => {
-          if (current) return current;
-          return normalizeCategoryId(nextProducts[0]?.category);
-        });
-        setError("");
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.details || err.code || err.message);
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      });
+    // Load initial data
+    const initialProducts = appStore.get("products") || [];
+    const initialTables = appStore.get("tables") || [];
+    setProducts(initialProducts);
+    setTables(initialTables);
+    setIsLoading(appStore.getState().loading);
 
-    return () => {
-      isMounted = false;
-    };
+    if (initialProducts.length > 0) {
+      setActiveCategory(normalizeCategoryId(initialProducts[0]?.category));
+    }
+
+    return unsubscribe;
   }, []);
 
   const selectedTable = tables.find((table) => table.id === decodedTableId);
+  const isOccupied = selectedTable?.status === "occupied";
+
+  const existingOrder = useMemo(() => {
+    if (!selectedTable?.currentOrderId) return null;
+    const allOrders = storeState.orders || [];
+    const order = allOrders.find((o) => o.id === selectedTable.currentOrderId);
+    if (!order) return null;
+
+    // Join order details
+    const allDetails = storeState.orderDetails || [];
+    const items = allDetails.filter((d) => d.orderId === order.id);
+    return {
+      ...order,
+      items,
+    };
+  }, [selectedTable, storeState.orders, storeState.orderDetails]);
+
+  const hasExistingOrder = Boolean(existingOrder);
 
   const categories = useMemo(() => {
     const categoryMap = new Map();
@@ -86,6 +102,12 @@ export default function OrderPage() {
   const addToCart = (product) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
+      const currentQty = existing ? existing.quantity : 0;
+      if (currentQty + 1 > product.stock) {
+        setError(`Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`);
+        return prev;
+      }
+      setError("");
       if (existing) {
         return prev.map((item) =>
           item.id === product.id
@@ -98,25 +120,128 @@ export default function OrderPage() {
   };
 
   const updateQuantity = (productId, delta) => {
-    setCart((prev) =>
-      prev
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+
+    setCart((prev) => {
+      const existing = prev.find((item) => item.id === productId);
+      if (!existing) return prev;
+      const newQty = existing.quantity + delta;
+      if (newQty > product.stock) {
+        setError(`Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`);
+        return prev;
+      }
+      setError("");
+      return prev
         .map((item) =>
           item.id === productId
-            ? { ...item, quantity: Math.max(0, item.quantity + delta) }
+            ? { ...item, quantity: Math.max(0, newQty) }
             : item,
         )
-        .filter((item) => item.quantity > 0),
-    );
+        .filter((item) => item.quantity > 0);
+    });
   };
 
-  const subtotal = cart.reduce(
+  // Subtotal for NEW items in cart
+  const cartSubtotal = cart.reduce(
     (sum, item) => sum + Number(item.price || 0) * item.quantity,
     0,
   );
+
+  // Subtotal for EXISTING items (if any)
+  const existingSubtotal = hasExistingOrder
+    ? (existingOrder.items || []).reduce(
+        (sum, item) => sum + Number(item.subtotal || 0),
+        0,
+      )
+    : 0;
+
+  // Combined subtotal
+  const subtotal = existingSubtotal + cartSubtotal;
   const safeDiscount = Math.max(0, Math.min(Number(discount) || 0, subtotal));
   const total = subtotal - safeDiscount;
 
-  const handleCheckout = async () => {
+  // === CHECKOUT: navigate to BillSummary (PAY_NOW flow) ===
+  const handleCheckout = () => {
+    if (!hasExistingOrder && cart.length === 0) return;
+
+    const authUser = getStoredAuthUser();
+
+    // Build combined items list for BillSummary
+    const existingItems = hasExistingOrder
+      ? (existingOrder.items || []).map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice || 0),
+          subtotal: Number(item.subtotal || 0),
+        }))
+      : [];
+
+    const newItems = cart.map((item) => ({
+      productId: item.id,
+      productName: item.name,
+      quantity: item.quantity,
+      unitPrice: Number(item.price || 0),
+      subtotal: Number(item.price || 0) * item.quantity,
+    }));
+
+    const allItems = [...existingItems, ...newItems];
+
+    const orderData = {
+      tableId: decodedTableId,
+      tableName: selectedTable?.name || `Bàn ${decodedTableId}`,
+      customerName: customer.name || "Khách lẻ",
+      customerPhone: customer.phone || "",
+      items: allItems,
+      subtotal,
+      discount: safeDiscount,
+      grandTotal: total,
+      createdBy: authUser?.username || "staff",
+      paymentMethod: paymentMethod,
+      existingOrderId: hasExistingOrder ? existingOrder.id : null,
+      newCartItems: newItems,
+    };
+
+    navigate("/bill-summary", { state: { orderData } });
+  };
+
+  // === Print receipt for the current items in the cart ===
+  const printCurrentCartReceipt = (orderId, isNewOrder = false) => {
+    try {
+      const receiptData = {
+        id: isNewOrder ? orderId : `${orderId} (Gọi thêm)`,
+        items: cart.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          price: Number(item.price || 0),
+          total: Number(item.price || 0) * item.quantity,
+        })),
+        subtotal: cartSubtotal,
+        discount: isNewOrder ? safeDiscount : 0,
+        tax: 0,
+        total: isNewOrder ? cartSubtotal - safeDiscount : cartSubtotal,
+      };
+
+      const tableData = {
+        number: selectedTable?.name || `Bàn ${decodedTableId}`,
+        guestCount: "1",
+      };
+
+      const restaurantData = storeInfo || {
+        name: "Quán Nước Quỳnh Anh",
+        address: "Địa chỉ nhà hàng",
+        phone: "Số điện thoại",
+      };
+
+      printReceipt(receiptData, tableData, restaurantData, "order_slip");
+    } catch (printErr) {
+      console.error("Failed to print receipt:", printErr);
+    }
+  };
+
+  // === PAY_LATER: create order + keep table occupied ===
+  const handlePayLater = async () => {
     if (cart.length === 0 || isSubmitting) return;
 
     setIsSubmitting(true);
@@ -124,13 +249,12 @@ export default function OrderPage() {
 
     try {
       const authUser = getStoredAuthUser();
+      const tempOrderId = `ord_local_${Date.now()}`;
 
-      // Prepare order data for bill summary
-      const orderData = {
+      // Create new order payload
+      const orderPayload = {
         tableId: decodedTableId,
-        tableName: selectedTable?.name || `Bàn ${decodedTableId}`,
         customerName: customer.name || "Khách lẻ",
-        customerPhone: customer.phone || "",
         items: cart.map((item) => ({
           productId: item.id,
           productName: item.name,
@@ -138,17 +262,165 @@ export default function OrderPage() {
           unitPrice: Number(item.price || 0),
           subtotal: Number(item.price || 0) * item.quantity,
         })),
-        subtotal,
+        subtotal: cartSubtotal,
         discount: safeDiscount,
-        grandTotal: total,
+        grandTotal: cartSubtotal - safeDiscount,
         createdBy: authUser?.username || "staff",
         paymentMethod: paymentMethod,
       };
 
-      // Navigate to bill summary with order data
-      navigate("/bill-summary", { state: { orderData } });
+      // 1. Instantly update AppStore for SPA-like responsiveness
+      const tempOrder = {
+        id: tempOrderId,
+        tableId: decodedTableId,
+        customerName: orderPayload.customerName,
+        status: "OPEN",
+        subtotal: orderPayload.subtotal,
+        discount: orderPayload.discount,
+        grandTotal: orderPayload.grandTotal,
+        paymentStatus: "PENDING",
+        createdBy: orderPayload.createdBy,
+        createdAt: new Date().toISOString(),
+      };
+      
+      const tempDetails = orderPayload.items.map((item) => ({
+        id: `detail_local_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        orderId: tempOrderId,
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        subtotal: item.subtotal,
+      }));
+
+      // Update orders, details, and mark table occupied
+      const currentOrders = appStore.get("orders") || [];
+      appStore.set("orders", [...currentOrders, tempOrder]);
+
+      const currentDetails = appStore.get("orderDetails") || [];
+      appStore.set("orderDetails", [...currentDetails, ...tempDetails]);
+
+      const currentTables = appStore.get("tables") || [];
+      appStore.set("tables", currentTables.map(t => 
+        t.id === decodedTableId ? { ...t, status: "occupied", currentOrderId: tempOrderId } : t
+      ));
+
+      // Trigger local stock reduction
+      const updatedProducts = products.map(p => {
+        const cartItem = cart.find(c => c.id === p.id);
+        return cartItem ? { ...p, stock: Math.max(0, p.stock - cartItem.quantity) } : p;
+      });
+      appStore.set("products", updatedProducts);
+
+      // Print slip immediately
+      printCurrentCartReceipt(tempOrderId, true);
+
+      // 2. Trigger background sync to server
+      orderApi.createOrder(orderPayload)
+        .then((serverOrder) => {
+          // Replace temp order and details with server order
+          const latestOrders = appStore.get("orders") || [];
+          const filtered = latestOrders.filter(o => o.id !== tempOrderId);
+          appStore.set("orders", [...filtered, serverOrder]);
+
+          const latestDetails = appStore.get("orderDetails") || [];
+          const detailsFiltered = latestDetails.filter(d => d.orderId !== tempOrderId);
+          const serverDetails = serverOrder.items || [];
+          appStore.set("orderDetails", [...detailsFiltered, ...serverDetails]);
+
+          // Update table with server order ID
+          const latestTables = appStore.get("tables") || [];
+          appStore.set("tables", latestTables.map(t => 
+            t.id === decodedTableId ? { ...t, currentOrderId: serverOrder.id } : t
+          ));
+        })
+        .catch(err => {
+          console.error("Failed to sync pay later order:", err);
+          appStore.setError("Lỗi đồng bộ đơn hàng lên máy chủ");
+        });
+
+      // Navigate back to KhuVucPage immediately
+      navigate("/khu-vuc", { replace: true });
     } catch (err) {
-      setError(err.details || err.code || err.message);
+      setError(err.message || "Tạo đơn hàng thất bại");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // === ADD ITEMS (for occupied table, without navigating away) ===
+  const handleAddItems = async () => {
+    if (cart.length === 0 || isSubmitting || !hasExistingOrder) return;
+
+    setIsSubmitting(true);
+    setError("");
+
+    try {
+      const orderId = existingOrder.id;
+      const newItems = cart.map((item) => ({
+        productId: item.id,
+        productName: item.name,
+        quantity: item.quantity,
+        unitPrice: Number(item.price || 0),
+        subtotal: Number(item.price || 0) * item.quantity,
+      }));
+
+      // 1. Instantly update AppStore
+      const tempDetails = newItems.map((item) => ({
+        id: `detail_local_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        orderId: orderId,
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        subtotal: item.subtotal,
+      }));
+
+      const currentDetails = appStore.get("orderDetails") || [];
+      appStore.set("orderDetails", [...currentDetails, ...tempDetails]);
+
+      const currentOrders = appStore.get("orders") || [];
+      appStore.set("orders", currentOrders.map(o => 
+        o.id === orderId ? {
+          ...o,
+          subtotal: o.subtotal + cartSubtotal,
+          discount: safeDiscount,
+          grandTotal: (o.subtotal + cartSubtotal) - safeDiscount
+        } : o
+      ));
+
+      // Local stock reduction
+      const updatedProducts = products.map(p => {
+        const cartItem = cart.find(c => c.id === p.id);
+        return cartItem ? { ...p, stock: Math.max(0, p.stock - cartItem.quantity) } : p;
+      });
+      appStore.set("products", updatedProducts);
+
+      // Print slip immediately
+      printCurrentCartReceipt(orderId, false);
+
+      // 2. Trigger background sync
+      orderApi.addItems(orderId, newItems, safeDiscount)
+        .then((result) => {
+          // result is { orderId, subtotal, discount, grandTotal, addedItems }
+          const latestOrders = appStore.get("orders") || [];
+          appStore.set("orders", latestOrders.map(o => 
+            o.id === orderId ? { ...o, subtotal: result.subtotal, discount: result.discount, grandTotal: result.grandTotal } : o
+          ));
+
+          const latestDetails = appStore.get("orderDetails") || [];
+          const detailsFiltered = latestDetails.filter(d => !tempDetails.some(t => t.productId === d.productId && t.orderId === d.orderId));
+          appStore.set("orderDetails", [...detailsFiltered, ...result.addedItems]);
+        })
+        .catch(err => {
+          console.error("Failed to sync added items:", err);
+          appStore.setError("Lỗi đồng bộ gọi thêm món lên máy chủ");
+        });
+
+      setCart([]);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Gọi thêm món thất bại");
     } finally {
       setIsSubmitting(false);
     }
@@ -166,21 +438,34 @@ export default function OrderPage() {
             </button>
             <div>
               <p className="text-sm text-gray-500">
-                Trạng thái: {selectedTable?.status || "không rõ"}
+                Trạng thái: {selectedTable?.status === "occupied" ? "Đang phục vụ" : (selectedTable?.status || "không rõ")}
               </p>
               <p className="font-semibold">
                 {selectedTable?.name || `Bàn ${decodedTableId}`}
               </p>
             </div>
           </div>
-          <button className="bg-gray-100 px-5 py-2 rounded-xl text-sm">
-            {decodedTableId}
-          </button>
+          <div className="flex items-center gap-2">
+            {hasExistingOrder && (
+              <span className="bg-emerald-100 text-emerald-700 text-xs font-medium px-3 py-1 rounded-full">
+                Đơn #{existingOrder.id}
+              </span>
+            )}
+            <button className="bg-gray-100 px-5 py-2 rounded-xl text-sm">
+              {decodedTableId}
+            </button>
+          </div>
         </div>
 
         {error && (
           <div className="bg-red-50 border-b border-red-200 px-6 py-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="bg-blue-50 border-b border-blue-200 px-6 py-3 text-sm text-blue-700">
+            Đang tải đơn hàng hiện tại...
           </div>
         )}
 
@@ -238,7 +523,7 @@ export default function OrderPage() {
                 >
                   {item.image && (
                     <img
-                      src={item.image}
+                      src={getDirectImageUrl(item.image)}
                       alt={item.name}
                       className="h-28 w-full object-cover"
                     />
@@ -265,7 +550,7 @@ export default function OrderPage() {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">#</span>
                   <span className="font-semibold">
-                    Giỏ hàng ({cart.length})
+                    {hasExistingOrder ? "Đơn hiện tại" : "Giỏ hàng"} ({cart.length})
                   </span>
                 </div>
                 <button
@@ -308,44 +593,87 @@ export default function OrderPage() {
               />
             </div>
 
-            <div className="flex-1 p-5 overflow-auto">
-              {cart.length === 0 ? (
-                <p className="text-center text-gray-400 mt-20">
-                  Chưa có món nào trong giỏ hàng
+            {/* Existing order items (read-only) */}
+            {hasExistingOrder && existingOrder.items?.length > 0 && (
+              <div className="p-5 border-b bg-gray-50">
+                <p className="text-sm font-semibold text-gray-600 mb-3">
+                  📋 Đã order trước đó
                 </p>
-              ) : (
-                cart.map((item) => (
+                {existingOrder.items.map((item, idx) => (
                   <div
-                    key={item.id}
-                    className="flex justify-between py-4 border-b gap-4"
+                    key={`existing-${idx}`}
+                    className="flex justify-between py-2 text-sm text-gray-600"
                   >
                     <div>
-                      <p className="font-medium">{item.name}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <button
-                          onClick={() => updateQuantity(item.id, -1)}
-                          className="w-8 h-8 rounded-full bg-gray-100"
-                        >
-                          -
-                        </button>
-                        <span className="font-medium">{item.quantity}</span>
-                        <button
-                          onClick={() => updateQuantity(item.id, 1)}
-                          className="w-8 h-8 rounded-full bg-gray-100"
-                        >
-                          +
-                        </button>
-                      </div>
+                      <p>{item.productName}</p>
+                      <p className="text-xs text-gray-400">
+                        x{item.quantity}
+                      </p>
                     </div>
-                    <p className="font-medium">
-                      {formatCurrency(Number(item.price || 0) * item.quantity)}
-                    </p>
+                    <p>{formatCurrency(Number(item.subtotal || 0))}</p>
                   </div>
-                ))
+                ))}
+                <div className="flex justify-between pt-2 border-t mt-2 text-sm font-medium">
+                  <span>Tạm tính (cũ)</span>
+                  <span>{formatCurrency(existingSubtotal)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* New cart items */}
+            <div className="flex-1 p-5 overflow-auto">
+              {cart.length === 0 ? (
+                <p className="text-center text-gray-400 mt-10">
+                  {hasExistingOrder
+                    ? "Chọn thêm món từ menu bên trái"
+                    : "Chưa có món nào trong giỏ hàng"}
+                </p>
+              ) : (
+                <>
+                  {hasExistingOrder && (
+                    <p className="text-sm font-semibold text-blue-600 mb-3">
+                      ➕ Món mới thêm
+                    </p>
+                  )}
+                  {cart.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex justify-between py-4 border-b gap-4"
+                    >
+                      <div>
+                        <p className="font-medium">{item.name}</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            onClick={() => updateQuantity(item.id, -1)}
+                            className="w-8 h-8 rounded-full bg-gray-100"
+                          >
+                            -
+                          </button>
+                          <span className="font-medium">{item.quantity}</span>
+                          <button
+                            onClick={() => updateQuantity(item.id, 1)}
+                            className="w-8 h-8 rounded-full bg-gray-100"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                      <p className="font-medium">
+                        {formatCurrency(Number(item.price || 0) * item.quantity)}
+                      </p>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
 
             <div className="p-5 border-t bg-gray-50">
+              {hasExistingOrder && cartSubtotal > 0 && (
+                <div className="flex justify-between mb-1 text-sm">
+                  <span className="text-gray-500">Món mới thêm</span>
+                  <span>{formatCurrency(cartSubtotal)}</span>
+                </div>
+              )}
               <div className="flex justify-between mb-1">
                 <span className="text-gray-600">Tạm tính</span>
                 <span>{formatCurrency(subtotal)}</span>
@@ -384,15 +712,31 @@ export default function OrderPage() {
                 </button>
               </div>
 
+              {/* Nút Thanh toán */}
               <button
                 onClick={handleCheckout}
-                disabled={cart.length === 0 || isSubmitting}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-2xl font-bold text-lg transition"
+                disabled={(cart.length === 0 && !hasExistingOrder) || isSubmitting}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-2xl font-bold text-lg transition mb-3"
               >
                 {isSubmitting
                   ? "Đang xử lý..."
                   : `Thanh toán ${paymentMethod === "cash" ? "tiền mặt" : "chuyển khoản"}`}
               </button>
+
+              {/* Nút Thanh toán sau (chỉ khi có món trong cart) */}
+              {cart.length > 0 && (
+                <button
+                  onClick={hasExistingOrder ? handleAddItems : handlePayLater}
+                  disabled={isSubmitting}
+                  className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 disabled:opacity-50 py-4 rounded-2xl font-bold text-lg transition"
+                >
+                  {isSubmitting
+                    ? "Đang xử lý..."
+                    : hasExistingOrder
+                      ? "➕ Gọi thêm món"
+                      : "⏳ Thanh toán sau"}
+                </button>
+              )}
             </div>
           </div>
         </div>

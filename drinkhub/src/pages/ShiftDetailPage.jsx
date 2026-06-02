@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import { shiftApi, orderApi } from "../api/Api";
+import appStore from "../services/AppStore";
+import CrudService from "../services/CrudService";
 import { formatCurrency } from "../utils/helpers";
 
 export default function ShiftDetailPage() {
@@ -19,38 +20,32 @@ export default function ShiftDetailPage() {
   const [showCloseModal, setShowCloseModal] = useState(false);
 
   useEffect(() => {
-    let isMounted = true;
+    const unsubscribe = appStore.subscribe((state) => {
+      const foundShift = state.shifts.find((s) => s.id === decodedShiftId);
+      setShift(foundShift || null);
+      setOrders(Array.isArray(state.orders) ? state.orders : []);
+      if (foundShift) {
+        setCashInRegister((prev) => {
+          if (showCloseModal) return prev;
+          return String(foundShift.totalPaid || foundShift.cashInRegister || 0);
+        });
+      }
+      setIsLoading(state.loading);
+      setError(state.error || "");
+    });
 
-    Promise.all([
-      shiftApi.getShifts().then((shifts) =>
-        shifts.find((s) => s.id === decodedShiftId),
-      ),
-      orderApi.getOrders(),
-    ])
-      .then(([shiftData, ordersData]) => {
-        if (!isMounted) return;
-        setShift(shiftData || null);
-        setOrders(Array.isArray(ordersData) ? ordersData : []);
-        if (shiftData) {
-          setCashInRegister(String(shiftData.totalPaid || 0));
-        }
-        setError("");
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.details || err.code || err.message);
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      });
+    const initialShifts = appStore.get("shifts") || [];
+    const foundShift = initialShifts.find((s) => s.id === decodedShiftId);
+    setShift(foundShift || null);
+    const initialOrders = appStore.get("orders") || [];
+    setOrders(initialOrders);
+    if (foundShift) {
+      setCashInRegister(String(foundShift.totalPaid || foundShift.cashInRegister || 0));
+    }
+    setIsLoading(appStore.getState().loading);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [decodedShiftId]);
+    return unsubscribe;
+  }, [decodedShiftId, showCloseModal]);
 
   const handleCloseShift = async () => {
     if (isSubmitting) return;
@@ -77,25 +72,21 @@ export default function ShiftDetailPage() {
 
       const totalPaid = Number(cashInRegister) || 0;
 
-      await shiftApi.closeShift(decodedShiftId, {
-        endTime: new Date().toISOString(),
-        totalRevenue,
-        totalPaid,
-        cashInRegister: totalPaid,
-      });
-
-      setShift((prev) => ({
-        ...prev,
+      const updatedShift = {
+        ...shift,
         status: "closed",
         endTime: new Date().toISOString(),
         totalRevenue,
         totalPaid,
         cashInRegister: totalPaid,
-      }));
+        closedAt: new Date().toISOString(),
+      };
+
+      await CrudService.update("shifts", updatedShift);
 
       setShowCloseModal(false);
     } catch (err) {
-      setError(err.details || err.code || err.message);
+      setError(err.message || "Đóng ca thất bại");
     } finally {
       setIsSubmitting(false);
     }

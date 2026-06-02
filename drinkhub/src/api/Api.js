@@ -198,7 +198,10 @@ function parseGasResponse_(rawText) {
 
 function unwrapApiResult_(result) {
   if (!result?.success) {
-    throw new ApiError(result?.error || "REQUEST_FAILED", result?.details);
+    throw new ApiError(
+      result?.error || "REQUEST_FAILED",
+      result?.details || result?.message || null
+    );
   }
   return result.data;
 }
@@ -291,7 +294,7 @@ async function requestViaFetch_(action, payload, options = {}) {
   }
 }
 
-async function request(action, payload = {}, options = {}) {
+export async function request(action, payload = {}, options = {}) {
   const transport = getApiTransport_();
   logger.always(`${action} via ${transport}`);
 
@@ -452,7 +455,53 @@ export const cache = {
 const LOCAL_DB_KEY = {
   PRODUCTS: "drinkhub:local_products",
   DISCOUNTS: "drinkhub:local_discounts",
+  SHIFTS: "drinkhub:local_shifts",
+  TABLES: "drinkhub:local_tables",
+  STORE_INFO: "drinkhub:local_store_info",
 };
+
+let isSynced = false;
+
+export async function syncAllData(force = false) {
+  if (isSynced && !force) return;
+  isSynced = true;
+  console.log("[DrinkHub Sync] Starting background sync...");
+  try {
+    const [products, discounts, tables, storeInfo, shifts] = await Promise.all([
+      request("GET_PRODUCTS"),
+      request("GET_DISCOUNTS"),
+      request("GET_TABLES"),
+      request("GET_STORE_INFO"),
+      request("GET_SHIFTS").catch(() => []),
+    ]);
+
+    if (Array.isArray(products)) {
+      writeLocalArray(LOCAL_DB_KEY.PRODUCTS, products);
+    }
+    if (Array.isArray(discounts)) {
+      writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, discounts);
+    }
+    if (Array.isArray(tables)) {
+      writeLocalArray(LOCAL_DB_KEY.TABLES, tables.map(normalizeTable));
+    }
+    if (storeInfo) {
+      const parsedStoreInfo = Array.isArray(storeInfo)
+        ? storeInfo.reduce((acc, item) => {
+          if (item?.key) acc[item.key] = item.value ?? "";
+          return acc;
+        }, {})
+        : storeInfo;
+      localStorage.setItem(LOCAL_DB_KEY.STORE_INFO, JSON.stringify(parsedStoreInfo));
+    }
+    if (Array.isArray(shifts)) {
+      writeLocalArray(LOCAL_DB_KEY.SHIFTS, shifts);
+    }
+    console.log("[DrinkHub Sync] Background sync completed successfully!");
+  } catch (err) {
+    console.error("[DrinkHub Sync] Background sync failed:", err);
+    isSynced = false;
+  }
+}
 
 function readLocalArray(key) {
   try {
@@ -508,23 +557,23 @@ function seedLocalProducts(products) {
 function normalizeOrderPayload(payload = {}) {
   const items = Array.isArray(payload.items)
     ? payload.items.map((item) => {
-        const safeItem = item || {};
-        const quantity = toFiniteNumber(safeItem.quantity, 1);
-        const unitPrice = toFiniteNumber(
-          safeItem.unitPrice ?? safeItem.price,
-          0,
-        );
-        return {
-          ...safeItem,
-          productId: String(safeItem.productId ?? safeItem.id ?? "").trim(),
-          productName: String(
-            safeItem.productName ?? safeItem.name ?? "",
-          ).trim(),
-          quantity,
-          unitPrice,
-          subtotal: toFiniteNumber(safeItem.subtotal, quantity * unitPrice),
-        };
-      })
+      const safeItem = item || {};
+      const quantity = toFiniteNumber(safeItem.quantity, 1);
+      const unitPrice = toFiniteNumber(
+        safeItem.unitPrice ?? safeItem.price,
+        0,
+      );
+      return {
+        ...safeItem,
+        productId: String(safeItem.productId ?? safeItem.id ?? "").trim(),
+        productName: String(
+          safeItem.productName ?? safeItem.name ?? "",
+        ).trim(),
+        quantity,
+        unitPrice,
+        subtotal: toFiniteNumber(safeItem.subtotal, quantity * unitPrice),
+      };
+    })
     : payload.items;
 
   const subtotal = toFiniteNumber(
@@ -574,6 +623,18 @@ export const orderApi = {
       version,
     });
   },
+
+  addItems(orderId, items, discount) {
+    return request("ADD_ITEMS_TO_ORDER", {
+      orderId,
+      items: normalizeOrderPayload({ items }).items,
+      discount,
+    });
+  },
+
+  getOrderByTicket(ticketId) {
+    return request("GET_ORDER_BY_TICKET", { ticketId });
+  },
 };
 
 /* =========================
@@ -582,65 +643,95 @@ export const orderApi = {
 
 export const productApi = {
   async getProducts() {
-    try {
-      const products = await request("GET_PRODUCTS");
-      seedLocalProducts(products);
-      return products;
-    } catch (err) {
-      const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
-      if (products.length) return products.filter((item) => item.status !== "DELETED");
-      throw err;
-    }
+    request("GET_PRODUCTS")
+      .then((products) => {
+        if (Array.isArray(products)) {
+          writeLocalArray(LOCAL_DB_KEY.PRODUCTS, products);
+        }
+      })
+      .catch((err) => {
+        console.error("Background GET_PRODUCTS failed:", err);
+      });
+
+    const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+    return products.filter((item) => item.status !== "DELETED");
   },
 
   async createProduct(payload) {
-    try {
-      return await request("CREATE_PRODUCT", payload);
-    } catch {
-      const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
-      const product = normalizeProductForLocal(payload);
-      writeLocalArray(LOCAL_DB_KEY.PRODUCTS, [...products, product]);
-      return product;
-    }
+    const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+    const product = normalizeProductForLocal(payload);
+    writeLocalArray(LOCAL_DB_KEY.PRODUCTS, [...products, product]);
+
+    request("CREATE_PRODUCT", payload)
+      .then((serverProduct) => {
+        const current = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+        const updated = current.map((p) =>
+          p.id === product.id ? serverProduct : p
+        );
+        writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
+      })
+      .catch((err) => {
+        console.error("Background CREATE_PRODUCT failed:", err);
+      });
+
+    return product;
   },
 
   async updateProduct(productId, payload) {
-    try {
-      return await request("UPDATE_PRODUCT", {
-        productId,
-        data: payload,
-        userRole: payload.userRole,
+    const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+    const product = normalizeProductForLocal({ ...payload, id: productId });
+    const exists = products.some((item) => item.id === productId);
+    const updated = exists
+      ? products.map((item) =>
+        item.id === productId
+          ? normalizeProductForLocal({ ...item, ...payload, id: productId })
+          : item,
+      )
+      : [...products, product];
+    writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
+
+    request("UPDATE_PRODUCT", {
+      productId,
+      data: payload,
+      userRole: payload.userRole,
+    })
+      .then((serverProduct) => {
+        const current = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+        const updatedWithServer = current.map((p) =>
+          p.id === productId ? serverProduct : p
+        );
+        writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updatedWithServer);
+      })
+      .catch((err) => {
+        console.error("Background UPDATE_PRODUCT failed:", err);
       });
-    } catch {
-      const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
-      const product = normalizeProductForLocal({ ...payload, id: productId });
-      const exists = products.some((item) => item.id === productId);
-      const updated = exists
-        ? products.map((item) =>
-            item.id === productId
-              ? normalizeProductForLocal({ ...item, ...payload, id: productId })
-              : item,
-          )
-        : [...products, product];
-      writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
-      return updated.find((item) => item.id === productId) || product;
-    }
+
+    return updated.find((item) => item.id === productId) || product;
   },
 
   async deleteProduct(productId, userRole) {
-    try {
-      return await request("DELETE_PRODUCT", {
-        productId,
-        userRole,
+    const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+    const updated = products.map((item) =>
+      item.id === productId ? { ...item, status: "DELETED" } : item,
+    );
+    writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
+
+    request("DELETE_PRODUCT", {
+      productId,
+      userRole,
+    })
+      .then(() => {
+        const current = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
+        const updatedWithServer = current.map((p) =>
+          p.id === productId ? { ...p, status: "DELETED" } : p
+        );
+        writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updatedWithServer);
+      })
+      .catch((err) => {
+        console.error("Background DELETE_PRODUCT failed:", err);
       });
-    } catch {
-      const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
-      const updated = products.map((item) =>
-        item.id === productId ? { ...item, status: "DELETED" } : item,
-      );
-      writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
-      return updated.find((item) => item.id === productId) || null;
-    }
+
+    return updated.find((item) => item.id === productId) || null;
   },
 };
 
@@ -650,65 +741,96 @@ export const productApi = {
 
 export const discountApi = {
   async getDiscounts() {
-    try {
-      const discounts = await request("GET_DISCOUNTS");
-      writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, discounts);
-      return discounts;
-    } catch {
-      return readLocalArray(LOCAL_DB_KEY.DISCOUNTS).filter(
-        (item) => item.status !== "DELETED",
-      );
-    }
+    request("GET_DISCOUNTS")
+      .then((discounts) => {
+        if (Array.isArray(discounts)) {
+          writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, discounts);
+        }
+      })
+      .catch((err) => {
+        console.error("Background GET_DISCOUNTS failed:", err);
+      });
+
+    return readLocalArray(LOCAL_DB_KEY.DISCOUNTS).filter(
+      (item) => item.status !== "DELETED",
+    );
   },
 
   async createDiscount(payload) {
-    try {
-      return await request("CREATE_DISCOUNT", payload);
-    } catch {
-      const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
-      const discount = normalizeDiscountForLocal(payload);
-      writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, [...discounts, discount]);
-      return discount;
-    }
+    const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
+    const discount = normalizeDiscountForLocal(payload);
+    writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, [...discounts, discount]);
+
+    request("CREATE_DISCOUNT", payload)
+      .then((serverDiscount) => {
+        const current = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
+        const updated = current.map((d) =>
+          d.id === discount.id ? serverDiscount : d
+        );
+        writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
+      })
+      .catch((err) => {
+        console.error("Background CREATE_DISCOUNT failed:", err);
+      });
+
+    return discount;
   },
 
   async updateDiscount(discountId, payload) {
-    try {
-      return await request("UPDATE_DISCOUNT", {
-        discountId,
-        data: payload,
-        userRole: payload.userRole,
+    const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
+    const discount = normalizeDiscountForLocal({ ...payload, id: discountId });
+    const exists = discounts.some((item) => item.id === discountId);
+    const updated = exists
+      ? discounts.map((item) =>
+        item.id === discountId
+          ? normalizeDiscountForLocal({ ...item, ...payload, id: discountId })
+          : item,
+      )
+      : [...discounts, discount];
+    writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
+
+    request("UPDATE_DISCOUNT", {
+      discountId,
+      data: payload,
+      userRole: payload.userRole,
+    })
+      .then((serverDiscount) => {
+        const current = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
+        const updatedWithServer = current.map((d) =>
+          d.id === discountId ? serverDiscount : d
+        );
+        writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updatedWithServer);
+      })
+      .catch((err) => {
+        console.error("Background UPDATE_DISCOUNT failed:", err);
       });
-    } catch {
-      const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
-      const discount = normalizeDiscountForLocal({ ...payload, id: discountId });
-      const exists = discounts.some((item) => item.id === discountId);
-      const updated = exists
-        ? discounts.map((item) =>
-            item.id === discountId
-              ? normalizeDiscountForLocal({ ...item, ...payload, id: discountId })
-              : item,
-          )
-        : [...discounts, discount];
-      writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
-      return updated.find((item) => item.id === discountId) || discount;
-    }
+
+    return updated.find((item) => item.id === discountId) || discount;
   },
 
   async deleteDiscount(discountId, userRole) {
-    try {
-      return await request("DELETE_DISCOUNT", {
-        discountId,
-        userRole,
+    const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
+    const updated = discounts.map((item) =>
+      item.id === discountId ? { ...item, status: "DELETED" } : item,
+    );
+    writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
+
+    request("DELETE_DISCOUNT", {
+      discountId,
+      userRole,
+    })
+      .then(() => {
+        const current = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
+        const updatedWithServer = current.map((d) =>
+          d.id === discountId ? { ...d, status: "DELETED" } : d
+        );
+        writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updatedWithServer);
+      })
+      .catch((err) => {
+        console.error("Background DELETE_DISCOUNT failed:", err);
       });
-    } catch {
-      const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
-      const updated = discounts.map((item) =>
-        item.id === discountId ? { ...item, status: "DELETED" } : item,
-      );
-      writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
-      return updated.find((item) => item.id === discountId) || null;
-    }
+
+    return updated.find((item) => item.id === discountId) || null;
   },
 };
 
@@ -718,8 +840,16 @@ export const discountApi = {
 
 export const tableApi = {
   async getTables() {
-    const tables = await request("GET_TABLES");
-    return Array.isArray(tables) ? tables.map(normalizeTable) : tables;
+    request("GET_TABLES")
+      .then((tables) => {
+        const normTables = Array.isArray(tables) ? tables.map(normalizeTable) : [];
+        writeLocalArray(LOCAL_DB_KEY.TABLES, normTables);
+      })
+      .catch((err) => {
+        console.error("Background GET_TABLES failed:", err);
+      });
+
+    return readLocalArray(LOCAL_DB_KEY.TABLES);
   },
 };
 
@@ -729,25 +859,84 @@ export const tableApi = {
 
 export const storeApi = {
   async getStoreInfo() {
-    const storeInfo = await request("GET_STORE_INFO");
-    if (!Array.isArray(storeInfo)) {
-      return storeInfo || {};
+    let cached = null;
+    try {
+      const raw = localStorage.getItem(LOCAL_DB_KEY.STORE_INFO);
+      if (raw) {
+        cached = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error("Read STORE_INFO cache failed:", e);
     }
 
-    return storeInfo.reduce((acc, item) => {
-      if (item?.key) {
-        acc[item.key] = item.value ?? "";
-      }
-      return acc;
-    }, {});
+    if (cached && cached.STORE_NAME) {
+      request("GET_STORE_INFO")
+        .then((storeInfo) => {
+          const parsed = Array.isArray(storeInfo)
+            ? storeInfo.reduce((acc, item) => {
+              if (item?.key) {
+                acc[item.key] = item.value ?? "";
+              }
+              return acc;
+            }, {})
+            : storeInfo || {};
+          localStorage.setItem(LOCAL_DB_KEY.STORE_INFO, JSON.stringify(parsed));
+        })
+        .catch((err) => {
+          console.error("Background GET_STORE_INFO failed:", err);
+        });
+      return cached;
+    }
+
+    try {
+      const storeInfo = await request("GET_STORE_INFO");
+      const parsed = Array.isArray(storeInfo)
+        ? storeInfo.reduce((acc, item) => {
+          if (item?.key) {
+            acc[item.key] = item.value ?? "";
+          }
+          return acc;
+        }, {})
+        : storeInfo || {};
+      localStorage.setItem(LOCAL_DB_KEY.STORE_INFO, JSON.stringify(parsed));
+      return parsed;
+    } catch (err) {
+      console.error("GET_STORE_INFO failed, using empty cached:", err);
+      return cached || {};
+    }
   },
 
-  updateStoreInfo(userRole, key, value) {
-    return request("UPDATE_STORE_INFO", {
+  async updateStoreInfo(userRole, key, value) {
+    let current = {};
+    try {
+      const raw = localStorage.getItem(LOCAL_DB_KEY.STORE_INFO);
+      current = raw ? JSON.parse(raw) : {};
+    } catch { }
+
+    current[key] = value;
+    localStorage.setItem(LOCAL_DB_KEY.STORE_INFO, JSON.stringify(current));
+
+    request("UPDATE_STORE_INFO", {
       userRole,
       key,
       value,
-    });
+    })
+      .then((storeInfo) => {
+        const parsed = Array.isArray(storeInfo)
+          ? storeInfo.reduce((acc, item) => {
+            if (item?.key) {
+              acc[item.key] = item.value ?? "";
+            }
+            return acc;
+          }, {})
+          : storeInfo || {};
+        localStorage.setItem(LOCAL_DB_KEY.STORE_INFO, JSON.stringify(parsed));
+      })
+      .catch((err) => {
+        console.error("Background UPDATE_STORE_INFO failed:", err);
+      });
+
+    return current;
   },
 };
 
@@ -805,6 +994,8 @@ export const authApi = {
   },
 
   logout(token) {
+    cache.clear();
+    isSynced = false;
     return request("LOGOUT", {
       token,
     });
@@ -858,19 +1049,73 @@ export const accountApi = {
  * ========================= */
 
 export const shiftApi = {
-  getShifts(filters = {}) {
-    return request("GET_SHIFTS", filters);
+  async getShifts(filters = {}) {
+    request("GET_SHIFTS", filters)
+      .then((shifts) => {
+        if (Array.isArray(shifts)) {
+          writeLocalArray(LOCAL_DB_KEY.SHIFTS, shifts);
+        }
+      })
+      .catch((err) => {
+        console.error("Background GET_SHIFTS failed:", err);
+      });
+
+    return readLocalArray(LOCAL_DB_KEY.SHIFTS);
   },
 
-  createShift(payload) {
-    return request("CREATE_SHIFT", payload);
+  async createShift(payload) {
+    const shifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+    const localShift = {
+      id: makeLocalId("shift_local"),
+      staffName: String(payload.staffName || "").trim(),
+      openingCash: toFiniteNumber(payload.openingCash),
+      totalRevenue: 0,
+      status: "open",
+      startTime: new Date().toISOString(),
+      endTime: null,
+    };
+    writeLocalArray(LOCAL_DB_KEY.SHIFTS, [localShift, ...shifts]);
+
+    request("CREATE_SHIFT", payload)
+      .then((shift) => {
+        const currentShifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+        const updated = currentShifts.map((s) =>
+          s.id === localShift.id ? shift : s
+        );
+        writeLocalArray(LOCAL_DB_KEY.SHIFTS, updated);
+      })
+      .catch((err) => {
+        console.error("Background CREATE_SHIFT failed:", err);
+      });
+
+    return localShift;
   },
 
-  closeShift(shiftId, payload) {
-    return request("CLOSE_SHIFT", {
+  async closeShift(shiftId, payload) {
+    const shifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+    const updated = shifts.map((s) =>
+      s.id === shiftId
+        ? { ...s, status: "closed", endTime: new Date().toISOString(), ...payload }
+        : s,
+    );
+    writeLocalArray(LOCAL_DB_KEY.SHIFTS, updated);
+
+    request("CLOSE_SHIFT", {
       shiftId,
       ...payload,
-    });
+    })
+      .then((result) => {
+        const currentShifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+        const updatedWithServer = currentShifts.map((s) =>
+          s.id === shiftId ? { ...s, ...result, status: "closed" } : s,
+        );
+        writeLocalArray(LOCAL_DB_KEY.SHIFTS, updatedWithServer);
+      })
+      .catch((err) => {
+        console.error("Background CLOSE_SHIFT failed:", err);
+      });
+
+    return updated.find((s) => s.id === shiftId) || null;
   },
 };
 
@@ -881,6 +1126,16 @@ export const shiftApi = {
 export const reportApi = {
   getReport(filters = {}) {
     return request("GET_REPORT", filters);
+  },
+};
+
+/* =========================
+ * UPLOAD API
+ * ========================= */
+
+export const uploadApi = {
+  uploadImageToGrive(base64, fileName) {
+    return request("UPLOAD_IMAGE", { base64, fileName });
   },
 };
 

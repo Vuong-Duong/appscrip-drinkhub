@@ -28,7 +28,7 @@ export default function HomePage() {
           {/* Hero Banner */}
           <div className="relative h-[210px] rounded-3xl overflow-hidden shadow-lg">
             <img
-              src="/images/cafe-bg.jpg"
+              src="https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=1200&q=80"
               alt="Cafe background"
               className="absolute inset-0 w-full h-full object-cover"
             />

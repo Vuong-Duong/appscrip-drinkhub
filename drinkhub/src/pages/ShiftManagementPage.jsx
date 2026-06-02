@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import { shiftApi } from "../api/Api";
+import CrudService from "../services/CrudService";
+import appStore from "../services/AppStore";
 import { formatCurrency } from "../utils/helpers";
 
 export default function ShiftManagementPage() {
   const navigate = useNavigate();
-  const [shifts, setShifts] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [storeState, setStoreState] = useState(appStore.getState());
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("open");
   const [showNewShiftModal, setShowNewShiftModal] = useState(false);
@@ -17,35 +17,25 @@ export default function ShiftManagementPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    let isMounted = true;
-
-    shiftApi
-      .getShifts()
-      .then((data) => {
-        if (isMounted) {
-          setShifts(Array.isArray(data) ? data : []);
-          setError("");
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.details || err.code || err.message);
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
+    const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
+    });
+    return unsubscribe;
   }, []);
 
+  const shifts = storeState.shifts || [];
+  const isLoading = storeState.loading;
+
   const handleCreateShift = async () => {
-    if (!staffName.trim()) {
-      alert("Vui lòng nhập tên nhân viên");
+    const trimmedStaffName = (staffName || "").trim();
+    const openingCashStr = String(openingCash !== undefined && openingCash !== null ? openingCash : "").trim();
+
+    if (!trimmedStaffName) {
+      setError("Vui lòng nhập tên nhân viên");
+      return;
+    }
+    if (openingCashStr === "" || isNaN(Number(openingCashStr)) || Number(openingCashStr) < 0) {
+      setError("Vui lòng nhập tiền mở ca hợp lệ (số không âm)");
       return;
     }
 
@@ -53,17 +43,24 @@ export default function ShiftManagementPage() {
     setError("");
 
     try {
-      const newShift = await shiftApi.createShift({
-        staffName: staffName.trim(),
-        openingCash: Number(openingCash) || 0,
-      });
+      const newShift = {
+        id: `shift_${Date.now()}`,
+        staffName: trimmedStaffName,
+        openingCash: parseInt(openingCashStr, 10) || 0,
+        totalRevenue: 0,
+        status: "open",
+        startTime: new Date().toISOString(),
+        endTime: null,
+      };
 
-      setShifts([newShift, ...shifts]);
+      await CrudService.create("shifts", newShift);
+
       setStaffName("");
       setOpeningCash("");
+      setError("");
       setShowNewShiftModal(false);
     } catch (err) {
-      setError(err.details || err.code || err.message);
+      setError(err.message || "Tạo ca thất bại");
     } finally {
       setIsSubmitting(false);
     }
@@ -107,7 +104,12 @@ export default function ShiftManagementPage() {
           </div>
 
           <button
-            onClick={() => setShowNewShiftModal(true)}
+            onClick={() => {
+              setStaffName("");
+              setOpeningCash("");
+              setError("");
+              setShowNewShiftModal(true);
+            }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-bold transition-all"
           >
             + Mở ca mới
@@ -116,8 +118,14 @@ export default function ShiftManagementPage() {
 
         {/* Error Message */}
         {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-2xl p-4 text-red-700">
-            {error}
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+            <p className="text-red-700">{error}</p>
+            <button
+              onClick={fetchShifts}
+              className="px-4 py-2 bg-red-100 text-red-700 rounded-xl font-medium hover:bg-red-200 transition-all flex-shrink-0"
+            >
+              Thử lại
+            </button>
           </div>
         )}
 
@@ -217,6 +225,11 @@ export default function ShiftManagementPage() {
             <div className="p-6 border-b">
               <h3 className="text-2xl font-bold">Mở ca mới</h3>
             </div>
+            {error && (
+              <div className="mx-6 mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl font-medium border border-red-100">
+                {error}
+              </div>
+            )}
             <div className="p-6 space-y-6">
               <div>
                 <label className="block text-sm text-gray-600 mb-2">
@@ -238,14 +251,17 @@ export default function ShiftManagementPage() {
                   type="number"
                   value={openingCash}
                   onChange={(e) => setOpeningCash(e.target.value)}
-                  placeholder="0"
+                  placeholder="Nhập tiền mở ca"
                   className="w-full border rounded-2xl px-4 py-3 focus:outline-none focus:border-blue-500"
                 />
               </div>
             </div>
             <div className="flex border-t">
               <button
-                onClick={() => setShowNewShiftModal(false)}
+                onClick={() => {
+                  setShowNewShiftModal(false);
+                  setError("");
+                }}
                 disabled={isSubmitting}
                 className="flex-1 py-4 font-medium text-gray-600 border-r hover:bg-gray-50 disabled:opacity-50 rounded-bl-3xl"
               >

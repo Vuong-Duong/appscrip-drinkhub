@@ -25,6 +25,7 @@ const PAYMENT_PROVIDERS = {
   GENERIC_BANK: "bank",
 
   CASH: "cash",
+  TRANSFER: "transfer",
 };
 
 const VALID_PAYMENT_PROVIDERS = [
@@ -43,6 +44,7 @@ const VALID_PAYMENT_PROVIDERS = [
   PAYMENT_PROVIDERS.GENERIC_BANK,
 
   PAYMENT_PROVIDERS.CASH,
+  PAYMENT_PROVIDERS.TRANSFER,
 ];
 
 /* =========================

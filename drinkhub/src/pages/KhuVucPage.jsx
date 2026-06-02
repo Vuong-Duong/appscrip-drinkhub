@@ -2,41 +2,45 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import { tableApi } from "../api/Api";
+import appStore from "../services/AppStore";
+import BootstrapService from "../services/BootstrapService";
 
 export default function TablePage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("ban");
   const [tables, setTables] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let isMounted = true;
+    const unsubscribe = appStore.subscribe((state) => {
+      const newTables = Array.isArray(state.tables) ? state.tables : [];
+      setTables(newTables);
+      // Only show loading if there's NO data yet and global loading is true
+      setIsLoading(state.loading && newTables.length === 0);
+      setError(state.error || "");
+    });
 
-    tableApi
-      .getTables()
-      .then((data) => {
-        if (isMounted) {
-          setTables(Array.isArray(data) ? data : []);
-          setError("");
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.details || err.code || err.message);
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      });
+    const initialTables = appStore.get("tables") || [];
+    setTables(initialTables);
+    // If we have cached data, don't show loading
+    setIsLoading(initialTables.length === 0 && appStore.getState().loading);
 
-    return () => {
-      isMounted = false;
-    };
+    return unsubscribe;
   }, []);
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      setError("");
+      await BootstrapService.forceRefresh();
+    } catch (err) {
+      setError(err.message || "Tải lại thất bại");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const available = tables.filter((t) => t.status === "available").length;
   const occupied = tables.filter((t) => t.status === "occupied").length;
@@ -93,9 +97,19 @@ export default function TablePage() {
             </button>
           </div>
 
-          <div className="text-sm text-gray-500 flex items-center gap-2">
-            Bàn có hóa đơn
-            <span className="inline-block w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRefresh}
+              className="bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-600 rounded-2xl px-5 py-3 shadow-sm active:scale-95 transition-all text-sm font-medium flex items-center gap-2"
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? "🔄 Đang tải..." : "🔄 Tải lại dữ liệu"}
+            </button>
+
+            <div className="text-sm text-gray-500 flex items-center gap-2">
+              Bàn có hóa đơn
+              <span className="inline-block w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+            </div>
           </div>
         </div>
 

@@ -3,82 +3,84 @@
  * ========================= */
 
 const createOrder = (payload) => {
-  const orderId = generateId_("ord");
+  return withTransaction_("reduce_stock", () => {
+    const orderId = generateId_("ord");
 
-  // === VALIDATE STOCK TRƯỚC KHI TẠO ORDER ===
-  validateStockBeforeOrder_(payload.items || []);
+    // === VALIDATE STOCK TRƯỚC KHI TẠO ORDER ===
+    validateStockBeforeOrder_(payload.items || []);
 
-  const orderData = {
-    id: orderId,
-    tableId: payload.tableId,
-    customerName: payload.customerName || "Khách lẻ",
-    status: "OPEN",
-    items: payload.items || [],
-    subtotal: payload.subtotal,
-    discount: payload.discount || 0,
-    grandTotal: payload.grandTotal,
-    paymentStatus: "PENDING",
-    createdBy: payload.createdBy || "staff",
-    createdAt: toIsoString_(new Date()),
-    version: APP_CONFIG.SNAPSHOT_VERSION,
-  };
+    const orderData = {
+      id: orderId,
+      tableId: payload.tableId,
+      customerName: payload.customerName || "Khách lẻ",
+      status: "OPEN",
+      items: payload.items || [],
+      subtotal: payload.subtotal,
+      discount: payload.discount || 0,
+      grandTotal: payload.grandTotal,
+      paymentStatus: "PENDING",
+      createdBy: payload.createdBy || "staff",
+      createdAt: toIsoString_(new Date()),
+      version: APP_CONFIG.SNAPSHOT_VERSION,
+    };
 
-  // 1. Lưu Order chính
-  appendRowsBatch_(SHEET_NAME.ORDER, [
-    [
+    // 1. Lưu Order chính
+    appendRowsBatch_(SHEET_NAME.ORDER, [
+      [
+        orderData.id,
+        orderData.tableId,
+        orderData.customerName,
+        orderData.status,
+        orderData.subtotal,
+        orderData.discount,
+        orderData.grandTotal,
+        orderData.paymentStatus,
+        orderData.createdBy,
+        orderData.createdAt,
+      ],
+    ]);
+
+    // 2. Lưu ORDER_DETAIL cho từng sản phẩm
+    const orderDetails = orderData.items.map((item) => [
+      generateId_("detail"),
       orderData.id,
-      orderData.tableId,
-      orderData.customerName,
-      orderData.status,
-      orderData.subtotal,
-      orderData.discount,
-      orderData.grandTotal,
-      orderData.paymentStatus,
-      orderData.createdBy,
-      orderData.createdAt,
-    ],
-  ]);
+      item.productId,
+      item.productName || "",
+      item.quantity,
+      item.unitPrice || 0,
+      item.subtotal || 0,
+    ]);
 
-  // 2. Lưu ORDER_DETAIL cho từng sản phẩm
-  const orderDetails = orderData.items.map((item) => [
-    generateId_("detail"),
-    orderData.id,
-    item.productId,
-    item.productName || "",
-    item.quantity,
-    item.unitPrice || 0,
-    item.subtotal || 0,
-  ]);
+    if (orderDetails.length > 0) {
+      appendRowsBatch_(SHEET_NAME.ORDER_DETAIL, orderDetails);
+    }
 
-  if (orderDetails.length > 0) {
-    appendRowsBatch_(SHEET_NAME.ORDER_DETAIL, orderDetails);
-  }
+    // 3. Lưu Snapshot (Immutable)
+    appendRowsBatch_(SHEET_NAME.ORDER_SNAPSHOT, [
+      [
+        orderData.id,
+        JSON.stringify(orderData),
+        orderData.version,
+        orderData.createdAt,
+      ],
+    ]);
 
-  // 3. Lưu Snapshot (Immutable)
-  appendRowsBatch_(SHEET_NAME.ORDER_SNAPSHOT, [
-    [
-      orderData.id,
-      JSON.stringify(orderData),
-      orderData.version,
-      orderData.createdAt,
-    ],
-  ]);
+    // === REDUCE STOCK SAU KHI ORDER CREATED ===
+    reduceProductStock_(payload.items || []);
 
-  // === REDUCE STOCK SAU KHI ORDER CREATED ===
-  reduceProductStock_(payload.items || []);
+    // === OCCUPY TABLE ===
+    if (payload.tableId) {
+      occupyTable(payload.tableId, orderId);
+    }
 
-  // === OCCUPY TABLE ===
-  if (payload.tableId) {
-    occupyTable(payload.tableId, orderId);
-  }
+    logAction_("CREATE_ORDER", orderData.id, orderData.createdBy, {
+      grandTotal: orderData.grandTotal,
+      itemCount: orderData.items.length,
+    });
+    pushDeltaSafe_("ORDER", "CREATE", orderData);
 
-  logAction_("CREATE_ORDER", orderData.id, orderData.createdBy, {
-    grandTotal: orderData.grandTotal,
-    itemCount: orderData.items.length,
+    return orderData;
   });
-  pushDeltaSafe_("ORDER", "CREATE", orderData);
-
-  return orderData;
 };
 
 // Freeze khi thanh toán thành công
@@ -177,6 +179,152 @@ const mapOrderDetailRow_ = (row) => ({
   unitPrice: toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.UNIT_PRICE]),
   subtotal: toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.SUBTOTAL]),
 });
+
+/**
+ * Thêm món vào order đang mở (PAY_LATER flow)
+ * - Validate order OPEN + PENDING
+ * - Append items mới vào ORDER_DETAIL
+ * - Cập nhật subtotal, grandTotal trên ORDER row
+ * - Cập nhật snapshot
+ * - Giảm stock
+ */
+const addItemsToOrder = (orderId, newItems, discount) => {
+  return withTransaction_("reduce_stock", () => {
+    const orderRow = findRowById_(SHEET_NAME.ORDER, orderId);
+    if (!orderRow) {
+      throw new Error("ORDER_NOT_FOUND");
+    }
+
+    const row = orderRow.values;
+    const status = trimSafe_(row[SHEET_SCHEMA.ORDER.STATUS]);
+    const paymentStatus = trimSafe_(row[SHEET_SCHEMA.ORDER.PAYMENT_STATUS]);
+
+    if (status !== "OPEN") {
+      throw new Error("ORDER_NOT_OPEN");
+    }
+    if (paymentStatus === "PAID") {
+      throw new Error("ORDER_ALREADY_PAID");
+    }
+
+    // Validate stock
+    validateStockBeforeOrder_(newItems);
+
+    // Append new items to ORDER_DETAIL
+    const orderDetails = newItems.map((item) => [
+      generateId_("detail"),
+      orderId,
+      item.productId,
+      item.productName || "",
+      item.quantity,
+      item.unitPrice || 0,
+      item.subtotal || 0,
+    ]);
+
+    if (orderDetails.length > 0) {
+      appendRowsBatch_(SHEET_NAME.ORDER_DETAIL, orderDetails);
+    }
+
+    // Recalculate totals from ALL items in ORDER_DETAIL
+    const allDetailRows = getSheetData_(SHEET_NAME.ORDER_DETAIL, false);
+    let newSubtotal = 0;
+    for (let i = 1; i < allDetailRows.length; i++) {
+      const detailOrderId = trimSafe_(allDetailRows[i][SHEET_SCHEMA.ORDER_DETAIL.ORDER_ID]);
+      if (detailOrderId === orderId) {
+        newSubtotal += toNumberSafe_(allDetailRows[i][SHEET_SCHEMA.ORDER_DETAIL.SUBTOTAL]);
+      }
+    }
+
+    const safeDiscount = discount !== undefined && discount !== null
+      ? toNumberSafe_(discount)
+      : toNumberSafe_(row[SHEET_SCHEMA.ORDER.DISCOUNT]);
+    const newGrandTotal = newSubtotal - safeDiscount;
+
+    // Update ORDER row
+    row[SHEET_SCHEMA.ORDER.SUBTOTAL] = newSubtotal;
+    row[SHEET_SCHEMA.ORDER.DISCOUNT] = safeDiscount;
+    row[SHEET_SCHEMA.ORDER.GRAND_TOTAL] = newGrandTotal;
+    batchWriteRows_(SHEET_NAME.ORDER, orderRow.rowIndex, 1, [row]);
+    invalidateSheetCache_(SHEET_NAME.ORDER);
+
+    // Update snapshot
+    const snapshotRow = findRowById_(SHEET_NAME.ORDER_SNAPSHOT, orderId);
+    if (snapshotRow) {
+      let snapshot = parseJsonSafe_(
+        snapshotRow.values[SHEET_SCHEMA.ORDER_SNAPSHOT.SNAPSHOT_DATA],
+      );
+      if (snapshot) {
+        snapshot.items = [...(snapshot.items || []), ...newItems];
+        snapshot.subtotal = newSubtotal;
+        snapshot.discount = safeDiscount;
+        snapshot.grandTotal = newGrandTotal;
+
+        const sheet = getSheet_(SHEET_NAME.ORDER_SNAPSHOT);
+        sheet
+          .getRange(
+            snapshotRow.rowIndex,
+            SHEET_SCHEMA.ORDER_SNAPSHOT.SNAPSHOT_DATA + 1,
+          )
+          .setValue(JSON.stringify(snapshot));
+        invalidateSheetCache_(SHEET_NAME.ORDER_SNAPSHOT);
+      }
+    }
+
+    // Reduce stock
+    reduceProductStock_(newItems);
+
+    logAction_("ADD_ITEMS", orderId, "staff", {
+      newItemCount: newItems.length,
+      newSubtotal,
+      newGrandTotal,
+    });
+    pushDeltaSafe_("ORDER", "ADD_ITEMS", { orderId, newSubtotal, newGrandTotal });
+
+    return {
+      orderId,
+      subtotal: newSubtotal,
+      discount: safeDiscount,
+      grandTotal: newGrandTotal,
+      addedItems: newItems,
+    };
+  });
+};
+
+/**
+ * Lấy order đang mở theo ticketId (tableId)
+ * Dùng khi click bàn OCCUPIED để xem order hiện tại
+ */
+const getOrderByTicketId = (ticketId) => {
+  const orderRows = getSheetData_(SHEET_NAME.ORDER);
+  const detailRows = getSheetData_(SHEET_NAME.ORDER_DETAIL);
+
+  // Find OPEN order with this tableId
+  let foundOrder = null;
+  for (let i = 1; i < orderRows.length; i++) {
+    const order = mapOrderRow_(orderRows[i]);
+    if (order.tableId === ticketId && order.status === "OPEN") {
+      foundOrder = order;
+      break;
+    }
+  }
+
+  if (!foundOrder) {
+    return null;
+  }
+
+  // Get items for this order
+  const items = [];
+  for (let i = 1; i < detailRows.length; i++) {
+    const detail = mapOrderDetailRow_(detailRows[i]);
+    if (detail.orderId === foundOrder.id) {
+      items.push(detail);
+    }
+  }
+
+  return {
+    ...foundOrder,
+    items,
+  };
+};
 
 const getOrders = (filters = {}) => {
   const limit = Math.max(1, Math.min(toNumberSafe_(filters.limit, 100), 500));

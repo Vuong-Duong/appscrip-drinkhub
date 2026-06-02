@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
-import { orderApi } from "../api/Api";
 import { formatCurrency, formatDate } from "../utils/helpers";
+import { printReceipt } from "../utils/receipt";
+import appStore from "../services/AppStore";
 
 const formatDateTime = (value) => {
   if (!value) return "";
@@ -29,36 +30,65 @@ export default function OrderHistoryPage() {
     item: "",
     orderCode: "",
   });
-  const [orders, setOrders] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [storeState, setStoreState] = useState(appStore.getState());
   const [error, setError] = useState("");
 
+  const storeInfo = storeState.settings || {};
+
+  // Subscribe to AppStore changes
   useEffect(() => {
-    let isMounted = true;
-
-    orderApi
-      .getOrders({ limit: 200 })
-      .then((data) => {
-        if (isMounted) {
-          setOrders(Array.isArray(data) ? data : []);
-          setError("");
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.details || err.code || err.message);
-        }
-      })
-      .finally(() => {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
+    const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
+    });
+    return unsubscribe;
   }, []);
+
+  const orders = useMemo(() => {
+    const allOrders = storeState.orders || [];
+    const allDetails = storeState.orderDetails || [];
+
+    return allOrders.map((order) => {
+      const items = allDetails.filter((d) => d.orderId === order.id);
+      return {
+        ...order,
+        items,
+      };
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [storeState.orders, storeState.orderDetails]);
+
+  const isLoading = storeState.loading;
+
+  const handleReprint = (order, type) => {
+    const receiptData = {
+      id: order.id,
+      items: (order.items || []).map((item) => ({
+        name: item.productName,
+        quantity: item.quantity,
+        price: item.unitPrice,
+        total: item.subtotal,
+      })),
+      subtotal: order.subtotal,
+      discount: order.discount,
+      tax: 0,
+      total: order.grandTotal,
+      createdBy: order.createdBy,
+      createdAt: order.createdAt,
+      paymentMethod: order.paymentMethod || "cash",
+    };
+
+    const tableData = {
+      number: order.tableId ? `Bàn ${order.tableId}` : "N/A",
+      guestCount: "1",
+    };
+
+    const restaurantData = storeInfo || {
+      name: "Quán Nước Quỳnh Anh",
+      address: "Địa chỉ nhà hàng",
+      phone: "Số điện thoại",
+    };
+
+    printReceipt(receiptData, tableData, restaurantData, type);
+  };
 
   const staffOptions = useMemo(
     () => Array.from(new Set(orders.map((order) => order.createdBy).filter(Boolean))),
@@ -185,36 +215,93 @@ export default function OrderHistoryPage() {
             filteredOrders.map((order) => (
               <div
                 key={order.id}
-                className="bg-white rounded-2xl shadow-sm p-6 hover:shadow transition"
+                className="bg-white rounded-3xl shadow-sm p-6 hover:shadow transition border border-gray-100"
               >
-                <div className="flex justify-between items-start mb-4">
+                <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-4 pb-4 border-b">
                   <div>
-                    <p className="font-mono font-bold text-lg text-blue-600">
-                      {order.id} - {order.tableId || "Mang về"} - Bàn
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      TN: {order.createdBy || "--"} - {formatDateTime(order.createdAt)}
-                    </p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {order.status} / {order.paymentStatus} -{" "}
-                      {formatCurrency(order.grandTotal)}
-                    </p>
-                  </div>
-                  <button className="text-blue-600 hover:text-blue-700 font-medium text-sm">
-                    In lại phiếu yêu cầu
-                  </button>
-                </div>
-
-                <div className="space-y-3 pl-4 border-l-2 border-gray-200">
-                  {order.items?.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3">
-                      <span className="text-gray-400">({item.quantity})</span>
-                      <span className="font-medium">{item.productName}</span>
-                      <span className="text-gray-500 text-sm">
-                        - {formatItemTime(order.createdAt)}
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-lg text-blue-600">
+                        {order.id}
+                      </span>
+                      <span className="bg-gray-100 text-gray-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                        {order.tableId ? `Bàn ${order.tableId}` : "Mang về"}
+                      </span>
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                        order.status === "CLOSED" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
+                      }`}>
+                        {order.status === "CLOSED" ? "Hoàn tất" : "Đang phục vụ"}
+                      </span>
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                        order.paymentStatus === "PAID" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                      }`}>
+                        {order.paymentStatus === "PAID" ? "Đã thanh toán" : "Chưa thanh toán"}
                       </span>
                     </div>
-                  ))}
+                    <p className="text-sm text-gray-500 mt-2 font-medium">
+                      Thu ngân: <span className="text-gray-800 font-semibold">{order.createdBy || "--"}</span> &bull; Giờ: <span className="text-gray-800 font-semibold">{formatDateTime(order.createdAt)}</span>
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2.5">
+                    <button
+                      onClick={() => handleReprint(order, "order_slip")}
+                      className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold text-xs px-3.5 py-2 rounded-xl transition"
+                    >
+                      🖨️ In Phiếu Đặt Đồ
+                    </button>
+                    <button
+                      onClick={() => handleReprint(order, "payment_receipt")}
+                      className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-semibold text-xs px-3.5 py-2 rounded-xl transition"
+                    >
+                      🖨️ In Hóa Đơn
+                    </button>
+                  </div>
+                </div>
+
+                {/* Items Detail Table */}
+                <div className="mt-4">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                    Chi tiết đơn hàng
+                  </p>
+                  <div className="bg-gray-50 rounded-2xl overflow-hidden border border-gray-100">
+                    <table className="w-full text-sm text-left border-collapse">
+                      <thead className="bg-gray-100/70 text-gray-600 font-bold border-b text-xs">
+                        <tr>
+                          <th className="px-4 py-2.5">Tên món</th>
+                          <th className="px-4 py-2.5 text-center w-16">SL</th>
+                          <th className="px-4 py-2.5 text-right w-24">Đơn giá</th>
+                          <th className="px-4 py-2.5 text-right w-28">Thành tiền</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 text-gray-600">
+                        {order.items?.map((item) => (
+                          <tr key={item.id} className="hover:bg-gray-100/30 transition">
+                            <td className="px-4 py-3 font-medium text-gray-800">{item.productName}</td>
+                            <td className="px-4 py-3 text-center font-bold text-gray-900">{item.quantity}</td>
+                            <td className="px-4 py-3 text-right">{formatCurrency(item.unitPrice)}</td>
+                            <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(item.subtotal)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Billing Summary block */}
+                <div className="mt-4 flex flex-col items-end gap-1.5 text-sm">
+                  <div className="flex justify-between w-64 text-gray-500">
+                    <span>Tạm tính:</span>
+                    <span className="font-semibold text-gray-700">{formatCurrency(order.subtotal)}</span>
+                  </div>
+                  {order.discount > 0 && (
+                    <div className="flex justify-between w-64 text-red-600 font-medium">
+                      <span>Giảm giá:</span>
+                      <span>-{formatCurrency(order.discount)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between w-64 font-bold text-base text-gray-900 border-t pt-2 mt-1">
+                    <span>Tổng cộng:</span>
+                    <span className="text-emerald-600">{formatCurrency(order.grandTotal)}</span>
+                  </div>
                 </div>
               </div>
             ))}

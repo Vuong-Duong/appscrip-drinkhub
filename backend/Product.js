@@ -115,29 +115,37 @@ function validateStockBeforeOrder_(items) {
     throw new Error("INVALID_ITEMS: items must be non-empty array");
   }
 
+  // Aggregate quantities by productId
+  const qtyMap = {};
+  items.forEach(function (item) {
+    const pId = trimSafe_(item.productId);
+    if (!pId) return;
+    qtyMap[pId] = (qtyMap[pId] || 0) + toNumberSafe_(item.quantity);
+  });
+
   var products = getProducts(false); // Get all products
   var map = {};
   products.forEach(function (p) {
     map[p.id] = p;
   });
 
-  items.forEach(function (item) {
-    var product = map[item.productId];
+  Object.keys(qtyMap).forEach(function (productId) {
+    var product = map[productId];
     if (!product) {
-      throw new Error("PRODUCT_NOT_FOUND: " + item.productId);
+      throw new Error("PRODUCT_NOT_FOUND: " + productId);
     }
-    const qty = toNumberSafe_(item.quantity);
-    if (qty <= 0) {
+    const totalQty = qtyMap[productId];
+    if (totalQty <= 0) {
       throw new Error("INVALID_QUANTITY: " + product.name);
     }
-    if (product.stock < qty) {
+    if (product.stock < totalQty) {
       throw new Error(
         "INSUFFICIENT_STOCK: " +
           product.name +
           ": available " +
           product.stock +
           ", requested " +
-          qty,
+          totalQty,
       );
     }
   });
@@ -165,7 +173,15 @@ function reduceProductStock_(items) {
 
           // ✓ Prevent negative stock
           if (newStock < 0) {
-            throw new Error("INSUFFICIENT_STOCK: " + productId);
+            const productName = trimSafe_(row[SHEET_SCHEMA.PRODUCT.NAME]);
+            throw new Error(
+              "INSUFFICIENT_STOCK: " +
+                productName +
+                ": available " +
+                currentStock +
+                ", requested " +
+                reduceQty,
+            );
           }
 
           row[SHEET_SCHEMA.PRODUCT.STOCK] = newStock;

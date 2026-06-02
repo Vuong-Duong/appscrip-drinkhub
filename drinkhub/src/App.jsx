@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   HashRouter,
   Navigate,
   Outlet,
   Route,
   Routes,
-  useLocation,
 } from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import KhuVucPage from "./pages/KhuVucPage";
@@ -26,32 +25,55 @@ import {
   getStoredAuthToken,
   setStoredAuthSession,
 } from "./utils/auth";
+import BootstrapService from "./services/BootstrapService";
+import appStore from "./services/AppStore";
 
 function ProtectedRoute() {
-  const location = useLocation();
   const [status, setStatus] = useState(() =>
-    getStoredAuthToken() ? "checking" : "unauthenticated",
+    getStoredAuthToken() ? "checking" : "unauthenticated"
   );
+  const [storeState, setStoreState] = useState(appStore.getState());
+  const bootstrapDone = React.useRef(false);
+
+  // Subscribe to AppStore changes
+  useEffect(() => {
+    const unsubscribe = appStore.subscribe((newState) => {
+      setStoreState({ ...newState });
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
     const token = getStoredAuthToken();
 
     if (!token) {
-      return undefined;
+      setStatus("unauthenticated");
+      return;
     }
 
     authApi
       .verify(token)
-      .then((user) => {
-        if (isMounted) {
-          setStoredAuthSession(user);
-          setStatus("authenticated");
+      .then(async (user) => {
+        if (!isMounted) return;
+        setStoredAuthSession(user);
+        appStore.setUser(user);
+        setStatus("authenticated");
+        
+        // Initialize cache-first bootstrap (only once)
+        if (!bootstrapDone.current) {
+          bootstrapDone.current = true;
+          try {
+            await BootstrapService.init();
+          } catch (e) {
+            console.error("Failed to bootstrap data", e);
+          }
         }
       })
       .catch(() => {
         if (isMounted) {
           clearStoredAuthSession();
+          appStore.setUser(null);
           setStatus("unauthenticated");
         }
       });
@@ -59,7 +81,7 @@ function ProtectedRoute() {
     return () => {
       isMounted = false;
     };
-  }, [location.pathname]);
+  }, []); // Only run once on mount
 
   if (status === "checking") {
     return (
@@ -70,7 +92,19 @@ function ProtectedRoute() {
   }
 
   if (status === "unauthenticated") {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    return <Navigate to="/login" replace />;
+  }
+
+  // Show a loading screen during first install if data isn't loaded yet
+  const hasData = storeState.products && storeState.products.length > 0;
+  if (storeState.loading && !hasData) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-slate-600">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="font-semibold text-lg">Đang tải dữ liệu lần đầu...</p>
+        <p className="text-sm text-gray-400">Ứng dụng đang thiết lập cơ sở dữ liệu ngoại tuyến.</p>
+      </div>
+    );
   }
 
   return <Outlet />;

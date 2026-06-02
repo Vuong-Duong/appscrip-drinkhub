@@ -1,0 +1,521 @@
+/**
+ * ProductManagementPage.css - Styles for ProductManagementPageExample.jsx
+ */
+
+.product-management-page {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  background: #f5f5f5;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* PAGE HEADER */
+.page-header {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.page-header h1 {
+  margin: 0 0 1rem 0;
+  font-size: 2rem;
+  color: #333;
+}
+
+.header-stats {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #666;
+}
+
+.stat strong {
+  color: #333;
+  font-weight: 700;
+}
+
+.stat.syncing {
+  color: #ffc107;
+}
+
+.stat.syncing strong {
+  color: #ff9800;
+}
+
+.stat.loading {
+  color: #0066cc;
+}
+
+.stat.error {
+  color: #dc3545;
+}
+
+/* PAGE ACTIONS */
+.page-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.search-box {
+  flex: 1;
+  min-width: 250px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #007bff;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #0056b3;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #545b62;
+}
+
+.btn-success {
+  background: #28a745;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #218838;
+}
+
+.btn-cancel {
+  background: #e9ecef;
+  color: #333;
+}
+
+.btn-cancel:hover {
+  background: #dee2e6;
+}
+
+/* FORM CARD */
+.form-card {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid #007bff;
+}
+
+.form-card h2 {
+  margin: 0 0 1.5rem 0;
+  color: #333;
+  font-size: 1.3rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.input {
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eee;
+}
+
+.form-actions .btn {
+  flex: 1;
+}
+
+/* PENDING INFO */
+.pending-info {
+  background: #fff8e1;
+  border: 2px solid #ffc107;
+  border-radius: 8px;
+  padding: 1.5rem;
+  border-left: 4px solid #ff9800;
+}
+
+.pending-info h3 {
+  margin: 0 0 0.75rem 0;
+  color: #ff9800;
+  font-size: 1.1rem;
+}
+
+.pending-info p {
+  margin: 0 0 1rem 0;
+  color: #666;
+  font-size: 0.95rem;
+}
+
+.pending-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pending-list li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  background: white;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.action-badge {
+  background: #007bff;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  min-width: 70px;
+  text-align: center;
+}
+
+.product-name {
+  color: #333;
+  font-weight: 500;
+  flex: 1;
+}
+
+/* PRODUCTS CONTAINER */
+.products-container {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.products-container h2 {
+  margin: 0 0 1.5rem 0;
+  color: #333;
+  font-size: 1.3rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem;
+  color: #999;
+}
+
+.empty-state p {
+  margin: 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.text-muted {
+  color: #ccc !important;
+  font-size: 0.9rem !important;
+}
+
+/* TABLE */
+.products-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.table-header {
+  display: grid;
+  grid-template-columns: 100px 1fr 120px 120px 120px 100px;
+  gap: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 6px 6px 0 0;
+  font-weight: 700;
+  color: #333;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 2px solid #dee2e6;
+}
+
+.table-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 120px 120px 120px 100px;
+  gap: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 4px;
+  align-items: center;
+  border-bottom: 1px solid #eee;
+  transition: all 0.2s;
+}
+
+.table-row:hover {
+  background: #f8f9fa;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.table-row.syncing {
+  opacity: 0.8;
+  background: #f0f7ff;
+}
+
+[class^='col-'] {
+  font-size: 0.95rem;
+}
+
+.col-id code {
+  background: #f5f5f5;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  color: #666;
+  font-family: 'Courier New', monospace;
+}
+
+.col-name {
+  font-weight: 500;
+  color: #333;
+}
+
+.col-price {
+  color: #007bff;
+  font-weight: 600;
+}
+
+.category-badge {
+  background: #e7f3ff;
+  color: #0066cc;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.status-badge.synced {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-badge.syncing {
+  background: #fff3cd;
+  color: #856404;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.col-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.action-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.edit-btn {
+  background: #e7f3ff;
+  color: #0066cc;
+}
+
+.edit-btn:hover:not(:disabled) {
+  background: #0066cc;
+  color: white;
+  transform: scale(1.1);
+}
+
+.delete-btn {
+  background: #ffe7e7;
+  color: #cc0000;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #cc0000;
+  color: white;
+  transform: scale(1.1);
+}
+
+/* RESPONSIVE */
+@media (max-width: 1024px) {
+  .table-header,
+  .table-row {
+    grid-template-columns: 80px 1fr 100px 100px 100px 80px;
+  }
+
+  .header-stats {
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .product-management-page {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .page-actions {
+    flex-direction: column;
+  }
+
+  .search-input,
+  .action-buttons {
+    width: 100%;
+  }
+
+  .action-buttons {
+    flex-direction: column;
+  }
+
+  .btn {
+    width: 100%;
+  }
+
+  .page-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .table-header,
+  .table-row {
+    grid-template-columns: 1fr;
+  }
+
+  .table-header {
+    display: none;
+  }
+
+  .table-row {
+    padding: 1rem;
+    border: 2px solid #eee;
+    border-radius: 6px;
+    gap: 0.75rem;
+  }
+
+  [class^='col-'] {
+    display: flex;
+    justify-content: space-between;
+  }
+
+  [class^='col-']:before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #666;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .form-actions .btn {
+    width: 100%;
+  }
+}
