@@ -34,7 +34,7 @@ const getShifts = (filters = {}) => {
 
     return normalized;
   } catch (err) {
-    logError_("GET_SHIFTS", err);
+    logAction_("ERROR", "GET_SHIFTS", "system", { error: err.message });
     throw new Error("SHIFT_FETCH_FAILED");
   }
 };
@@ -77,7 +77,7 @@ const createShift = (payload = {}) => {
       closedAt: "",
     };
   } catch (err) {
-    logError_("CREATE_SHIFT", err);
+    logAction_("ERROR", "CREATE_SHIFT", "system", { error: err.message });
     throw new Error("SHIFT_CREATE_FAILED");
   }
 };
@@ -112,7 +112,7 @@ const closeShift = (shiftId, payload = {}) => {
     row[SHEET_SCHEMA.SHIFT.STATUS] = "closed";
     row[SHEET_SCHEMA.SHIFT.CLOSED_AT] = now;
 
-    updateRowsBatch_(SHEET_NAME.SHIFT, [{ rowIndex, row }]);
+    batchWriteRows_(SHEET_NAME.SHIFT, rowIndex + 1, 1, [row]);
     invalidateSheetCache_(SHEET_NAME.SHIFT);
 
     return {
@@ -129,7 +129,7 @@ const closeShift = (shiftId, payload = {}) => {
       closedAt: now,
     };
   } catch (err) {
-    logError_("CLOSE_SHIFT", err);
+    logAction_("ERROR", "CLOSE_SHIFT", "system", { error: err.message });
     throw new Error("SHIFT_CLOSE_FAILED");
   }
 };

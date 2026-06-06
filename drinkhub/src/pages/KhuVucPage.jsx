@@ -62,7 +62,7 @@ export default function TablePage() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <div className="flex-1 pt-16 pb-20 px-4 md:px-6 max-w-7xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto pt-[60px] sm:pt-16 pb-20 px-3 sm:px-4 md:px-6 max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-4 mb-6">
           <button
             onClick={() => navigate("/")}
@@ -70,21 +70,11 @@ export default function TablePage() {
           >
             &larr;
           </button>
-          <h1 className="text-2xl font-bold text-gray-900">Quan ly khu vuc</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Khu vực</h1>
         </div>
 
         <div className="flex items-center justify-between mb-6">
           <div className="inline-flex bg-white rounded-2xl p-1 shadow">
-            <button
-              onClick={() => setActiveTab("hoadon")}
-              className={`px-10 py-3 rounded-xl font-medium transition-all ${
-                activeTab === "hoadon"
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Hóa đơn
-            </button>
             <button
               onClick={() => setActiveTab("ban")}
               className={`px-10 py-3 rounded-xl font-medium transition-all ${

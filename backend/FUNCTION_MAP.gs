@@ -262,18 +262,20 @@
  *
  * GAS Project Merge Order:
  * 1. Core.gs
- * 2. Sync.gs
- * 3. Account.gs
- * 4. Auth.gs
- * 5. Product.gs
- * 6. Table.gs
- * 7. Order.gs
- * 8. Payment.gs
- * 9. Store_Info.gs
- * 10. System.gs
- * 11. Validation.gs
- * 12. Api.gs
- * 13. VERIFICATION_TESTS.gs
- * 14. INDEX.gs
- * 15. FUNCTION_MAP.gs
+ * 2. Setup.gs
+ * 3. Sync.gs
+ * 4. Account.gs
+ * 5. Auth.gs
+ * 6. Product.gs
+ * 7. Table.gs
+ * 8. Order.gs
+ * 9. Payment.gs
+ * 10. Store_Info.gs
+ * 11. System.gs
+ * 12. Validation.gs
+ * 13. Backend.gs
+ * 14. Api.gs
+ * 15. VERIFICATION_TESTS.gs
+ * 16. INDEX.gs
+ * 17. FUNCTION_MAP.gs
  */

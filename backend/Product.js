@@ -160,6 +160,7 @@ function reduceProductStock_(items) {
     var rows = getSheetData_(SHEET_NAME.PRODUCT, false);
     var updatedRows = rows.slice();
     var reduced = 0;
+    var journalRows = [];
 
     for (var i = 1; i < updatedRows.length; i++) {
       var row = updatedRows[i];
@@ -186,14 +187,17 @@ function reduceProductStock_(items) {
 
           row[SHEET_SCHEMA.PRODUCT.STOCK] = newStock;
 
-          // Log inventory change
-          createInventoryJournal_({
-            productId: productId,
-            type: "REDUCE_BY_ORDER",
-            quantity: reduceQty,
-            beforeStock: currentStock,
-            afterStock: newStock,
-          });
+          // Collect journal row (gom lại ghi 1 lần)
+          journalRows.push([
+            generateId_("inv"),
+            productId,
+            "REDUCE_BY_ORDER",
+            reduceQty,
+            currentStock,
+            newStock,
+            "",
+            toIsoString_(new Date()),
+          ]);
 
           reduced++;
         }
@@ -202,6 +206,12 @@ function reduceProductStock_(items) {
 
     // ✓ Atomic write - only write if no error
     batchWriteRows_(SHEET_NAME.PRODUCT, 1, updatedRows.length, updatedRows);
+
+    // ✓ Ghi tất cả journal 1 lần duy nhất
+    if (journalRows.length > 0) {
+      appendRowsBatch_(APP_CONFIG.INVENTORY_JOURNAL_SHEET, journalRows);
+    }
+
     pushDeltaSafe_("PRODUCT", "STOCK_REDUCE", { items, reduced });
     return reduced;
   });

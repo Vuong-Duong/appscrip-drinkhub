@@ -151,9 +151,10 @@ export default function DashboardPage() {
 
   const getCachedReport = (range, start = "", end = "") => {
     try {
-      const cacheKey = range === "custom"
-        ? `drinkhub:report_custom_${start}_${end}`
-        : `drinkhub:report_${range}`;
+      const cacheKey =
+        range === "custom"
+          ? `drinkhub:report_custom_${start}_${end}`
+          : `drinkhub:report_${range}`;
       const cached = localStorage.getItem(cacheKey);
       return cached ? JSON.parse(cached) : null;
     } catch {
@@ -167,9 +168,10 @@ export default function DashboardPage() {
 
   const fetchReport = async (filters = {}) => {
     const range = filters.range || "today";
-    const cacheKey = range === "custom"
-      ? `drinkhub:report_custom_${filters.customStart || ""}_${filters.customEnd || ""}`
-      : `drinkhub:report_${range}`;
+    const cacheKey =
+      range === "custom"
+        ? `drinkhub:report_custom_${filters.customStart || ""}_${filters.customEnd || ""}`
+        : `drinkhub:report_${range}`;
 
     let cachedData = null;
     try {
@@ -270,7 +272,7 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <div className="flex-1 pt-16 pb-20 px-4 md:px-6 max-w-7xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto pt-[60px] sm:pt-16 pb-20 px-3 sm:px-4 md:px-6 max-w-7xl mx-auto w-full">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
@@ -285,7 +287,8 @@ export default function DashboardPage() {
               <p className="text-sm text-gray-500 mt-1">
                 {report?.period?.range === "custom"
                   ? `Từ ${new Date(report?.period?.startDate).toLocaleDateString("vi-VN")} đến ${new Date(report?.period?.endDate).toLocaleDateString("vi-VN")}`
-                  : filterOptions.find((opt) => opt.value === filterRange)?.label}
+                  : filterOptions.find((opt) => opt.value === filterRange)
+                      ?.label}
               </p>
             </div>
           </div>

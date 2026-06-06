@@ -33,7 +33,8 @@ export default function BillSummaryPage() {
   }, [orderData]);
 
   const handlePrintReceipt = () => {
-    const receiptId = createdOrder?.id || orderData?.existingOrderId || `ord_${Date.now()}`;
+    const receiptId =
+      createdOrder?.id || orderData?.existingOrderId || `ord_${Date.now()}`;
     setIsPrinting(true);
 
     try {
@@ -100,16 +101,24 @@ export default function BillSummaryPage() {
       };
 
       if (existingOrderObj) {
-        appStore.set("orders", currentOrders.map(o => o.id === orderId ? closedOrder : o));
+        appStore.set(
+          "orders",
+          currentOrders.map((o) => (o.id === orderId ? closedOrder : o)),
+        );
       } else {
         appStore.set("orders", [...currentOrders, closedOrder]);
       }
 
       // Release table in AppStore
       const currentTables = appStore.get("tables") || [];
-      appStore.set("tables", currentTables.map(t => 
-        t.id === orderData.tableId ? { ...t, status: "available", currentOrderId: "" } : t
-      ));
+      appStore.set(
+        "tables",
+        currentTables.map((t) =>
+          String(t.id) === String(orderData.tableId)
+            ? { ...t, status: "available", currentOrderId: "" }
+            : t,
+        ),
+      );
 
       // Auto print payment receipt immediately
       try {
@@ -147,14 +156,21 @@ export default function BillSummaryPage() {
       const syncProcess = async () => {
         try {
           let finalOrderId = orderId;
-          
+
           if (!orderData.existingOrderId) {
             // New order
             const serverOrder = await orderApi.createOrder(orderData);
             finalOrderId = serverOrder.id;
-          } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
+          } else if (
+            orderData.newCartItems &&
+            orderData.newCartItems.length > 0
+          ) {
             // Existing order + new items
-            await orderApi.addItems(orderData.existingOrderId, orderData.newCartItems, orderData.discount);
+            await orderApi.addItems(
+              orderData.existingOrderId,
+              orderData.newCartItems,
+              orderData.discount,
+            );
           }
 
           // Process payment
@@ -165,7 +181,9 @@ export default function BillSummaryPage() {
             transactionId: `${orderData.paymentMethod}_${finalOrderId}_${Date.now()}`,
           });
 
-          console.log(`Background payment sync succeeded for order: ${finalOrderId}`);
+          console.log(
+            `Background payment sync succeeded for order: ${finalOrderId}`,
+          );
         } catch (err) {
           console.error("Failed to sync payment in background:", err);
           appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
@@ -191,7 +209,7 @@ export default function BillSummaryPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <div className="flex-1 pt-16 pb-20 px-4 md:px-6 max-w-4xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto pt-[60px] sm:pt-16 pb-20 px-3 sm:px-4 md:px-6 max-w-4xl mx-auto w-full">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
           <button
@@ -200,7 +218,9 @@ export default function BillSummaryPage() {
           >
             &larr;
           </button>
-          <h1 className="text-3xl font-bold text-gray-900">Tổng kết thanh toán</h1>
+          <h1 className="text-3xl font-bold text-gray-900">
+            Tổng kết thanh toán
+          </h1>
         </div>
 
         {/* Error Message */}
@@ -227,7 +247,9 @@ export default function BillSummaryPage() {
                 {orderData.customerPhone && (
                   <div className="col-span-2">
                     <p className="text-sm text-gray-500">Số điện thoại</p>
-                    <p className="text-lg font-bold">{orderData.customerPhone}</p>
+                    <p className="text-lg font-bold">
+                      {orderData.customerPhone}
+                    </p>
                   </div>
                 )}
               </div>
@@ -238,7 +260,10 @@ export default function BillSummaryPage() {
               <h3 className="text-lg font-bold mb-4">Danh sách sản phẩm</h3>
               <div className="space-y-3">
                 {orderData.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-start bg-gray-50 p-3 rounded-xl">
+                  <div
+                    key={idx}
+                    className="flex justify-between items-start bg-gray-50 p-3 rounded-xl"
+                  >
                     <div className="flex-1">
                       <p className="font-medium">{item.productName}</p>
                       <p className="text-sm text-gray-500">
@@ -276,20 +301,26 @@ export default function BillSummaryPage() {
           <div className="bg-white rounded-3xl p-6 shadow-sm flex flex-col h-fit sticky top-20">
             {/* Payment Method */}
             <div className="mb-6 pb-6 border-b">
-              <p className="text-sm text-gray-500 mb-2">Phương thức thanh toán</p>
+              <p className="text-sm text-gray-500 mb-2">
+                Phương thức thanh toán
+              </p>
               <div className="flex items-center gap-2">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-lg font-bold">
                   💳
                 </div>
                 <p className="font-bold">
-                  {orderData.paymentMethod === "cash" ? "Tiền mặt" : "Chuyển khoản"}
+                  {orderData.paymentMethod === "cash"
+                    ? "Tiền mặt"
+                    : "Chuyển khoản"}
                 </p>
               </div>
             </div>
 
             {/* Amount */}
             <div className="mb-8 text-center">
-              <p className="text-sm text-gray-500 mb-2">Số tiền cần thanh toán</p>
+              <p className="text-sm text-gray-500 mb-2">
+                Số tiền cần thanh toán
+              </p>
               <p className="text-4xl font-bold text-emerald-600">
                 {formatCurrency(total)}
               </p>
@@ -324,7 +355,6 @@ export default function BillSummaryPage() {
                 ← Quay lại
               </button>
             </div>
-
 
             {/* Order Status */}
             {createdOrder && (

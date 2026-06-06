@@ -61,8 +61,8 @@ const releaseTable = (tableId, orderId = null) => {
 
 /**
  * Occupy bàn khi tạo order
- * Refactored to throw errors, return raw table data
- * ✓ Check if already occupied
+ * ✓ Nếu bàn đã occupied cùng orderId → bỏ qua (idempotent)
+ * ✓ Nếu bàn đã occupied khác orderId → cập nhật orderId mới (race condition / retry)
  * ✓ Use lock to prevent concurrent occupy
  */
 const occupyTable = (tableId, orderId) => {
@@ -77,12 +77,17 @@ const occupyTable = (tableId, orderId) => {
     const status = trimSafe_(row[SHEET_SCHEMA.TABLE.STATUS]);
     const currentOrderId = trimSafe_(row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID]);
 
-    // ✓ Check if already occupied
-    if (status === "OCCUPIED") {
-      throw new Error("TABLE_ALREADY_OCCUPIED");
+    // Nếu bàn đã occupied cùng orderId → không cần ghi lại (idempotent)
+    if (status === "OCCUPIED" && currentOrderId === orderId) {
+      return {
+        id: tableId,
+        name: trimSafe_(row[SHEET_SCHEMA.TABLE.NAME]),
+        status: "OCCUPIED",
+        currentOrderId: orderId,
+      };
     }
 
-    row[SHEET_SCHEMA.TABLE.STATUS] = "OCCUPIED"; // Đang sử dụng
+    row[SHEET_SCHEMA.TABLE.STATUS] = "OCCUPIED";
     row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID] = orderId;
 
     batchWriteRows_(SHEET_NAME.TABLE, tableRow.rowIndex, 1, [row]);
@@ -90,6 +95,7 @@ const occupyTable = (tableId, orderId) => {
     logAction_("OCCUPY_TABLE", tableId, "system", {
       orderId: orderId,
       table: row[SHEET_SCHEMA.TABLE.NAME],
+      previousOrderId: currentOrderId || null,
     });
 
     const occupiedTable = {

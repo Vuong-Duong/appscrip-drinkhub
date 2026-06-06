@@ -48,7 +48,7 @@ const isDateInRange_ = (dateStr, startDate, endDate) => {
     const date = new Date(dateStr);
     if (!startDate || !endDate) return true;
     return date >= startDate && date <= endDate;
-  } catch {
+  } catch (e) {
     return false;
   }
 };
@@ -186,7 +186,7 @@ const getReportData = (filters = {}) => {
       topCategories: topCategoriesArray,
     };
   } catch (err) {
-    logError_("getReportData", err);
+    logAction_("ERROR", "getReportData", "system", { error: err.message });
     throw err;
   }
 };

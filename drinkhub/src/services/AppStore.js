@@ -54,8 +54,15 @@ class AppStore {
       ];
 
       entities.forEach((entity) => {
-        const data = StorageService.get(entity);
+        let data = StorageService.get(entity);
         if (data) {
+          if (entity === "tables" && Array.isArray(data)) {
+            data = data.map((t) => ({
+              ...t,
+              id: String(t.id),
+              status: String(t.status || "").trim().toLowerCase(),
+            }));
+          }
           this.state[entity] = data;
         }
       });
@@ -106,9 +113,17 @@ class AppStore {
    * @param {boolean} persist - Also save to localStorage
    */
   set(entity, data, persist = true) {
-    this.state[entity] = data;
+    let finalData = data;
+    if (entity === "tables" && Array.isArray(data)) {
+      finalData = data.map((t) => ({
+        ...t,
+        id: String(t.id),
+        status: String(t.status || "").trim().toLowerCase(),
+      }));
+    }
+    this.state[entity] = finalData;
     if (persist) {
-      StorageService.set(entity, data);
+      StorageService.set(entity, finalData);
     }
     this._notify();
   }
@@ -126,15 +141,24 @@ class AppStore {
       return;
     }
 
-    const idx = arr.findIndex((x) => x.id === item.id);
+    let finalItem = item;
+    if (entity === "tables" && item) {
+      finalItem = {
+        ...item,
+        id: String(item.id),
+        status: item.status ? String(item.status).trim().toLowerCase() : undefined,
+      };
+    }
+
+    const idx = arr.findIndex((x) => String(x.id) === String(finalItem.id));
     if (idx >= 0) {
-      arr[idx] = { ...arr[idx], ...item };
+      arr[idx] = { ...arr[idx], ...finalItem };
     } else {
-      arr.push(item);
+      arr.push(finalItem);
     }
 
     if (persist) {
-      StorageService.update(entity, item);
+      StorageService.update(entity, finalItem);
     }
     this._notify();
   }
@@ -186,7 +210,15 @@ class AppStore {
    */
   loadAll(allData) {
     Object.keys(allData).forEach((entity) => {
-      this.state[entity] = allData[entity];
+      let data = allData[entity];
+      if (entity === "tables" && Array.isArray(data)) {
+        data = data.map((t) => ({
+          ...t,
+          id: String(t.id),
+          status: String(t.status || "").trim().toLowerCase(),
+        }));
+      }
+      this.state[entity] = data;
     });
     StorageService.setAll(allData);
     this.state.lastSync = Date.now();

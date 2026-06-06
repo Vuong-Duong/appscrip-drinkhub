@@ -90,7 +90,6 @@ const SHEET_SCHEMA = Object.freeze({
     SUBTOTAL: 6,
   }),
   ORDER_SNAPSHOT: Object.freeze({
-    ID: 0,
     ORDER_ID: 0,
     SNAPSHOT_DATA: 1,
     VERSION: 2,
@@ -415,4 +414,170 @@ const validate_ = (validator, payload, errorCode) => {
   if (!validation.valid) {
     throw new Error(errorCode + ": " + validation.errors.join(", "));
   }
+};
+
+// =========================
+// PERSISTENT CACHE FIRST - ENHANCEMENTS
+// =========================
+
+/**
+ * Backend Row Index Map Cache
+ * Maps id → row number for quick lookup without full sheet scan
+ */
+let _rowIndexMapCache_ = {};
+
+const buildRowIndexMap_ = (sheetName, idColumnIndex = 0) => {
+  const cacheKey = `${sheetName}_indexMap`;
+  const rows = getSheetData_(sheetName, true);
+  const map = {};
+
+  for (let i = 1; i < rows.length; i++) {
+    const id = trimSafe_(rows[i][idColumnIndex]);
+    if (id) {
+      map[id] = i + 1; // Sheet rows are 1-indexed
+    }
+  }
+
+  _rowIndexMapCache_[cacheKey] = map;
+  return map;
+};
+
+const getRowIndexMap_ = (sheetName, idColumnIndex = 0) => {
+  const cacheKey = `${sheetName}_indexMap`;
+  if (_rowIndexMapCache_[cacheKey]) {
+    return _rowIndexMapCache_[cacheKey];
+  }
+  return buildRowIndexMap_(sheetName, idColumnIndex);
+};
+
+const invalidateRowIndexMap_ = (sheetName) => {
+  const cacheKey = `${sheetName}_indexMap`;
+  delete _rowIndexMapCache_[cacheKey];
+};
+
+/**
+ * Soft Delete Helper
+ * Check if row is deleted (STATUS = "DELETED")
+ */
+const isRowDeleted_ = (row, statusColumnIndex) => {
+  if (statusColumnIndex === undefined) return false;
+  const status = trimSafe_(row[statusColumnIndex]);
+  return status === "DELETED";
+};
+
+/**
+ * Retry Safe Wrapper with exponential backoff
+ * @param {Function} callback
+ * @param {number} maxRetries - Default 3
+ * @param {number} baseDelayMs - Default 100
+ * @returns {*} Result from callback
+ */
+function withRetry_(callback, maxRetries, baseDelayMs) {
+  maxRetries = maxRetries === undefined ? 3 : maxRetries;
+  baseDelayMs = baseDelayMs === undefined ? 100 : baseDelayMs;
+  if (typeof callback !== "function") throw new Error("CALLBACK_REQUIRED");
+
+  var lastError;
+  for (var attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return callback();
+    } catch (err) {
+      lastError = err;
+      var isLastAttempt = attempt === maxRetries - 1;
+
+      if (isLastAttempt) break;
+
+      // Exponential backoff: 100ms, 200ms, 400ms
+      var delayMs = baseDelayMs * Math.pow(2, attempt);
+      Utilities.sleep(delayMs);
+    }
+  }
+
+  throw new Error(
+    "RETRY_EXHAUSTED (" + maxRetries + " attempts): " + lastError.message
+  );
+}
+
+/**
+ * Schema Validator for batch data
+ * Validates required fields before write
+ */
+const validateBatchData_ = (
+  records,
+  requiredFields = [],
+  maxRecords = 1000,
+) => {
+  const errors = [];
+
+  if (!Array.isArray(records)) {
+    throw new Error("BATCH_NOT_ARRAY");
+  }
+
+  if (records.length === 0) {
+    throw new Error("BATCH_EMPTY");
+  }
+
+  if (records.length > maxRecords) {
+    throw new Error(
+      `BATCH_TOO_LARGE: max ${maxRecords}, got ${records.length}`,
+    );
+  }
+
+  records.forEach((record, idx) => {
+    if (!record || typeof record !== "object") {
+      errors.push(`Record ${idx}: not an object`);
+      return;
+    }
+
+    requiredFields.forEach((field) => {
+      const value = record[field];
+      if (value === null || value === undefined || value === "") {
+        errors.push(`Record ${idx}: missing ${field}`);
+      }
+    });
+  });
+
+  if (errors.length > 0) {
+    throw new Error("VALIDATION_FAILED: " + errors.join("; "));
+  }
+
+  return true;
+};
+
+/**
+ * Backend Cache Layer - for caching all entities data
+ * Used for first install getAllDataForCache()
+ */
+const backendCacheStore_ = () => {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    set: (key, value, ttlSeconds = 3600) => {
+      const data = {
+        value,
+        expiredAt: Date.now() + ttlSeconds * 1000,
+      };
+      props.setProperty(key, JSON.stringify(data));
+    },
+    get: (key) => {
+      const raw = props.getProperty(key);
+      if (!raw) return null;
+
+      try {
+        const data = JSON.parse(raw);
+        if (data.expiredAt && Date.now() > data.expiredAt) {
+          props.deleteProperty(key);
+          return null;
+        }
+        return data.value;
+      } catch (e) {
+        return null;
+      }
+    },
+    del: (key) => {
+      props.deleteProperty(key);
+    },
+    clear: () => {
+      props.deleteAllProperties();
+    },
+  };
 };

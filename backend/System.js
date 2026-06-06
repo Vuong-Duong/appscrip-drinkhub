@@ -11,17 +11,17 @@ function now_() {
 // =========================
 // logAction_ được khai báo ở Core.js, không cần lặp lại
 
-const logPayment_ = (orderId, paymentInfo, account = "system") => {
-  writeLog_("PAYMENT", `ORDER_${orderId}`, account, paymentInfo);
-};
+function logPayment_(orderId, paymentInfo, account) {
+  writeLog_("PAYMENT", "ORDER_" + orderId, account || "system", paymentInfo);
+}
 
-const logSystemError_ = (errorInfo) => {
+function logSystemError_(errorInfo) {
   writeLog_("ERROR", "SYSTEM", "system", errorInfo);
-};
+}
 
-const logAudit_ = (action, target, account, details) => {
+function logAudit_(action, target, account, details) {
   writeLog_(action, target, account, details);
-};
+}
 
 // =========================
 // QUEUE & JOB MANAGEMENT

@@ -153,52 +153,53 @@ export default function MenuManagementPage() {
 
     try {
       await CrudService.delete("products", productId);
+      alert("Xoá sản phẩm thành công!");
     } catch (err) {
       setError(err.message || "Xoá sản phẩm thất bại");
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <main className="pt-20 px-6 max-w-7xl mx-auto pb-10">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-4">
+      <main className="flex-1 overflow-y-auto pt-[60px] sm:pt-20 px-3 sm:px-6 max-w-7xl mx-auto pb-10 w-full">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 mb-6">
+          <div className="flex items-center gap-2 sm:gap-4">
             <button
               onClick={() => navigate("/")}
-              className="text-3xl text-gray-600 hover:text-gray-900"
+              className="text-2xl sm:text-3xl text-gray-600 hover:text-gray-900"
             >
               &larr;
             </button>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-lg sm:text-2xl font-bold text-gray-900">
                 Quản lý Thực đơn
               </h1>
-              <p className="text-sm text-gray-500">
-                Quản lý sản phẩm theo danh mục Hàng hoá
+              <p className="text-xs sm:text-sm text-gray-500">
+                Quản lý sản phẩm theo danh mục
               </p>
             </div>
           </div>
           <button
             onClick={openCreateModal}
-            className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
+            className="px-3 sm:px-5 py-2 sm:py-3 rounded-lg sm:rounded-xl bg-blue-600 text-white font-semibold text-sm sm:text-base hover:bg-blue-700 whitespace-nowrap"
           >
             Thêm sản phẩm
           </button>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 flex flex-wrap gap-3">
+        <div className="bg-white border border-gray-200 rounded-lg sm:rounded-2xl p-3 sm:p-4 mb-6 flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Tìm tên sản phẩm..."
-            className="border rounded-xl px-4 py-3 min-w-72"
+            placeholder="Tìm sản phẩm..."
+            className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[120px]"
           />
           <select
             value={category}
             onChange={(event) => setCategory(event.target.value)}
-            className="border rounded-xl px-4 py-3"
+            className="border rounded-lg px-3 py-2 text-sm"
           >
             <option value="">Tất cả danh mục</option>
             {categories.map((item) => (
@@ -209,18 +210,20 @@ export default function MenuManagementPage() {
           </select>
         </div>
 
-        {error && <div className="mb-4 text-red-600">{error}</div>}
+        {error && <div className="mb-4 text-red-600 text-sm">{error}</div>}
 
         {isLoading ? (
-          <div className="text-center py-16 text-gray-500">Đang tải...</div>
+          <div className="text-center py-16 text-gray-500 text-sm">
+            Đang tải...
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
             {filteredProducts.map((product) => (
               <div
                 key={product.id}
-                className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm"
+                className="bg-white border border-gray-200 rounded-lg sm:rounded-2xl overflow-hidden shadow-sm"
               >
-                <div className="h-36 bg-gray-100">
+                <div className="h-24 sm:h-36 bg-gray-100">
                   {product.image ? (
                     <img
                       src={getDirectImageUrl(product.image)}
@@ -228,53 +231,55 @@ export default function MenuManagementPage() {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <div className="h-full flex items-center justify-center text-gray-400">
+                    <div className="h-full flex items-center justify-center text-gray-400 text-xs sm:text-base">
                       Chưa có ảnh
                     </div>
                   )}
                 </div>
-                <div className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-bold text-gray-900">
+                <div className="p-2 sm:p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1">
+                      <h3 className="font-bold text-gray-900 text-xs sm:text-base truncate">
                         {product.name}
                       </h3>
-                      <p className="text-sm text-gray-500">
+                      <p className="text-xs text-gray-500">
                         {product.category}
                       </p>
                     </div>
-                    <span className="text-xs px-2 py-1 rounded-full bg-gray-100">
+                    <span className="text-[8px] sm:text-xs px-1.5 py-0.5 rounded-full bg-gray-100 whitespace-nowrap">
                       {product.status}
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm mt-4">
+                  <div className="grid grid-cols-2 gap-2 text-xs mt-2">
                     <div>
-                      <p className="text-gray-400">Giá bán</p>
-                      <p className="font-semibold">
+                      <p className="text-gray-400">Giá</p>
+                      <p className="font-semibold text-xs sm:text-sm">
                         {formatCurrency(product.price)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-gray-400">Giá vốn</p>
-                      <p className="font-semibold">
+                      <p className="text-gray-400">Vốn</p>
+                      <p className="font-semibold text-xs sm:text-sm">
                         {formatCurrency(product.cost)}
                       </p>
                     </div>
-                    <div>
+                    <div className="col-span-2">
                       <p className="text-gray-400">Tồn kho</p>
-                      <p className="font-semibold">{product.stock}</p>
+                      <p className="font-semibold text-xs sm:text-sm">
+                        {product.stock}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex gap-2 mt-4">
+                  <div className="flex gap-1 sm:gap-2 mt-2">
                     <button
                       onClick={() => openEditModal(product)}
-                      className="flex-1 py-2 rounded-xl bg-blue-50 text-blue-700 font-medium"
+                      className="flex-1 py-1.5 sm:py-2 rounded-lg bg-blue-50 text-blue-700 font-medium text-xs sm:text-sm"
                     >
                       Sửa
                     </button>
                     <button
                       onClick={() => handleDelete(product.id)}
-                      className="flex-1 py-2 rounded-xl bg-red-50 text-red-700 font-medium"
+                      className="flex-1 py-1.5 sm:py-2 rounded-lg bg-red-50 text-red-700 font-medium text-xs sm:text-sm"
                     >
                       Xoá
                     </button>

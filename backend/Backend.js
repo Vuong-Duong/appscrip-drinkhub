@@ -376,6 +376,10 @@ function rawDataToObjects_(rawData, schema, sheetName, entity) {
     }
 
     if (obj.id) {
+      // Normalize table status to lowercase (sheet stores OCCUPIED/AVAILABLE, frontend expects lowercase)
+      if (entity === "tables" && obj.status) {
+        obj.status = String(obj.status).trim().toLowerCase();
+      }
       objects.push(obj);
     }
   }

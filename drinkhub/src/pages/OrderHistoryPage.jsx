@@ -47,13 +47,18 @@ export default function OrderHistoryPage() {
     const allOrders = storeState.orders || [];
     const allDetails = storeState.orderDetails || [];
 
-    return allOrders.map((order) => {
-      const items = allDetails.filter((d) => d.orderId === order.id);
-      return {
-        ...order,
-        items,
-      };
-    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return allOrders
+      .map((order) => {
+        const items = allDetails.filter((d) => d.orderId === order.id);
+        return {
+          ...order,
+          items,
+        };
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
   }, [storeState.orders, storeState.orderDetails]);
 
   const isLoading = storeState.loading;
@@ -91,12 +96,16 @@ export default function OrderHistoryPage() {
   };
 
   const staffOptions = useMemo(
-    () => Array.from(new Set(orders.map((order) => order.createdBy).filter(Boolean))),
+    () =>
+      Array.from(
+        new Set(orders.map((order) => order.createdBy).filter(Boolean)),
+      ),
     [orders],
   );
 
   const tableOptions = useMemo(
-    () => Array.from(new Set(orders.map((order) => order.tableId).filter(Boolean))),
+    () =>
+      Array.from(new Set(orders.map((order) => order.tableId).filter(Boolean))),
     [orders],
   );
 
@@ -106,22 +115,25 @@ export default function OrderHistoryPage() {
     const hasItem =
       !itemKeyword ||
       order.items?.some((item) =>
-        String(item.productName || "").toLowerCase().includes(itemKeyword),
+        String(item.productName || "")
+          .toLowerCase()
+          .includes(itemKeyword),
       );
 
     return (
       (!filter.staff || order.createdBy === filter.staff) &&
-      (!filter.table || order.tableId === filter.table) &&
-      (!orderKeyword || String(order.id).toLowerCase().includes(orderKeyword)) &&
+      (!filter.table || String(order.tableId) === String(filter.table)) &&
+      (!orderKeyword ||
+        String(order.id).toLowerCase().includes(orderKeyword)) &&
       hasItem
     );
   });
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <div className="pt-16 p-6 max-w-7xl mx-auto">
+      <div className="flex-1 overflow-y-auto pt-[60px] sm:pt-16 p-3 sm:p-6 max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-4 mb-6">
           <button
             onClick={() => navigate(-1)}
@@ -226,19 +238,38 @@ export default function OrderHistoryPage() {
                       <span className="bg-gray-100 text-gray-700 text-xs font-semibold px-2.5 py-1 rounded-full">
                         {order.tableId ? `Bàn ${order.tableId}` : "Mang về"}
                       </span>
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                        order.status === "CLOSED" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
-                      }`}>
-                        {order.status === "CLOSED" ? "Hoàn tất" : "Đang phục vụ"}
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                          order.status === "CLOSED"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-blue-100 text-blue-700"
+                        }`}
+                      >
+                        {order.status === "CLOSED"
+                          ? "Hoàn tất"
+                          : "Đang phục vụ"}
                       </span>
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                        order.paymentStatus === "PAID" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                      }`}>
-                        {order.paymentStatus === "PAID" ? "Đã thanh toán" : "Chưa thanh toán"}
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                          order.paymentStatus === "PAID"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {order.paymentStatus === "PAID"
+                          ? "Đã thanh toán"
+                          : "Chưa thanh toán"}
                       </span>
                     </div>
                     <p className="text-sm text-gray-500 mt-2 font-medium">
-                      Thu ngân: <span className="text-gray-800 font-semibold">{order.createdBy || "--"}</span> &bull; Giờ: <span className="text-gray-800 font-semibold">{formatDateTime(order.createdAt)}</span>
+                      Thu ngân:{" "}
+                      <span className="text-gray-800 font-semibold">
+                        {order.createdBy || "--"}
+                      </span>{" "}
+                      &bull; Giờ:{" "}
+                      <span className="text-gray-800 font-semibold">
+                        {formatDateTime(order.createdAt)}
+                      </span>
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2.5">
@@ -268,17 +299,32 @@ export default function OrderHistoryPage() {
                         <tr>
                           <th className="px-4 py-2.5">Tên món</th>
                           <th className="px-4 py-2.5 text-center w-16">SL</th>
-                          <th className="px-4 py-2.5 text-right w-24">Đơn giá</th>
-                          <th className="px-4 py-2.5 text-right w-28">Thành tiền</th>
+                          <th className="px-4 py-2.5 text-right w-24">
+                            Đơn giá
+                          </th>
+                          <th className="px-4 py-2.5 text-right w-28">
+                            Thành tiền
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 text-gray-600">
                         {order.items?.map((item) => (
-                          <tr key={item.id} className="hover:bg-gray-100/30 transition">
-                            <td className="px-4 py-3 font-medium text-gray-800">{item.productName}</td>
-                            <td className="px-4 py-3 text-center font-bold text-gray-900">{item.quantity}</td>
-                            <td className="px-4 py-3 text-right">{formatCurrency(item.unitPrice)}</td>
-                            <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(item.subtotal)}</td>
+                          <tr
+                            key={item.id}
+                            className="hover:bg-gray-100/30 transition"
+                          >
+                            <td className="px-4 py-3 font-medium text-gray-800">
+                              {item.productName}
+                            </td>
+                            <td className="px-4 py-3 text-center font-bold text-gray-900">
+                              {item.quantity}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {formatCurrency(item.unitPrice)}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-gray-900">
+                              {formatCurrency(item.subtotal)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -290,7 +336,9 @@ export default function OrderHistoryPage() {
                 <div className="mt-4 flex flex-col items-end gap-1.5 text-sm">
                   <div className="flex justify-between w-64 text-gray-500">
                     <span>Tạm tính:</span>
-                    <span className="font-semibold text-gray-700">{formatCurrency(order.subtotal)}</span>
+                    <span className="font-semibold text-gray-700">
+                      {formatCurrency(order.subtotal)}
+                    </span>
                   </div>
                   {order.discount > 0 && (
                     <div className="flex justify-between w-64 text-red-600 font-medium">
@@ -300,7 +348,9 @@ export default function OrderHistoryPage() {
                   )}
                   <div className="flex justify-between w-64 font-bold text-base text-gray-900 border-t pt-2 mt-1">
                     <span>Tổng cộng:</span>
-                    <span className="text-emerald-600">{formatCurrency(order.grandTotal)}</span>
+                    <span className="text-emerald-600">
+                      {formatCurrency(order.grandTotal)}
+                    </span>
                   </div>
                 </div>
               </div>

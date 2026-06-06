@@ -28,13 +28,19 @@ export default function ShiftManagementPage() {
 
   const handleCreateShift = async () => {
     const trimmedStaffName = (staffName || "").trim();
-    const openingCashStr = String(openingCash !== undefined && openingCash !== null ? openingCash : "").trim();
+    const openingCashStr = String(
+      openingCash !== undefined && openingCash !== null ? openingCash : "",
+    ).trim();
 
     if (!trimmedStaffName) {
       setError("Vui lòng nhập tên nhân viên");
       return;
     }
-    if (openingCashStr === "" || isNaN(Number(openingCashStr)) || Number(openingCashStr) < 0) {
+    if (
+      openingCashStr === "" ||
+      isNaN(Number(openingCashStr)) ||
+      Number(openingCashStr) < 0
+    ) {
       setError("Vui lòng nhập tiền mở ca hợp lệ (số không âm)");
       return;
     }
@@ -90,7 +96,7 @@ export default function ShiftManagementPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <div className="flex-1 pt-16 pb-20 px-4 md:px-6 max-w-7xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto pt-[60px] sm:pt-16 pb-20 px-3 sm:px-4 md:px-6 max-w-7xl mx-auto w-full">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">

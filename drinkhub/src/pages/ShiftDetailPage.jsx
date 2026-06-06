@@ -40,7 +40,9 @@ export default function ShiftDetailPage() {
     const initialOrders = appStore.get("orders") || [];
     setOrders(initialOrders);
     if (foundShift) {
-      setCashInRegister(String(foundShift.totalPaid || foundShift.cashInRegister || 0));
+      setCashInRegister(
+        String(foundShift.totalPaid || foundShift.cashInRegister || 0),
+      );
     }
     setIsLoading(appStore.getState().loading);
 
@@ -60,8 +62,7 @@ export default function ShiftDetailPage() {
         const shiftDate = new Date(shift.startTime);
         return (
           orderDate.toDateString() === shiftDate.toDateString() &&
-          (!shift.endTime ||
-            orderDate <= new Date(shift.endTime))
+          (!shift.endTime || orderDate <= new Date(shift.endTime))
         );
       });
 
@@ -142,7 +143,7 @@ export default function ShiftDetailPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <div className="flex-1 pt-16 pb-20 px-4 md:px-6 max-w-5xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto pt-[60px] sm:pt-16 pb-20 px-3 sm:px-4 md:px-6 max-w-5xl mx-auto w-full">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
@@ -230,7 +231,9 @@ export default function ShiftDetailPage() {
 
         {/* Orders Section */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-200 mb-8">
-          <h2 className="text-lg font-bold mb-4">Danh sách đơn hàng ({shiftOrders.length})</h2>
+          <h2 className="text-lg font-bold mb-4">
+            Danh sách đơn hàng ({shiftOrders.length})
+          </h2>
 
           {shiftOrders.length === 0 ? (
             <p className="text-center text-gray-500 py-8">
@@ -307,7 +310,8 @@ export default function ShiftDetailPage() {
 
               <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
                 <p className="text-sm font-medium text-blue-900">
-                  Chênh lệch: {formatCurrency(Number(cashInRegister) - totalRevenue)}
+                  Chênh lệch:{" "}
+                  {formatCurrency(Number(cashInRegister) - totalRevenue)}
                 </p>
               </div>
             </div>

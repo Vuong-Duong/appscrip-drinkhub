@@ -96,6 +96,7 @@ function ProductManagementPage() {
 
       // Optimistic update - UI changes instantly
       await CrudService.delete("products", productId);
+      alert("Xoá sản phẩm thành công!");
 
       console.log("Product deleted:", productId);
     } catch (error) {

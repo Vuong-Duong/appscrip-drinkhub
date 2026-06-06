@@ -66,7 +66,7 @@ export const API_CONFIG = {
 
   API_KEY: import.meta.env.VITE_GAS_API_KEY || "",
 
-  TIMEOUT: 15000,
+  TIMEOUT: 30000,
 
   SLOW_REQUEST_MS: 1000,
 
