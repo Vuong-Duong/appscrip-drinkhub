@@ -143,9 +143,11 @@ const SHEET_SCHEMA = Object.freeze({
     TOTAL_REVENUE: 5,
     TOTAL_PAID: 6,
     CASH_IN_REGISTER: 7,
-    STATUS: 8,
-    CREATED_AT: 9,
-    CLOSED_AT: 10,
+    CASH_AMOUNT: 8,
+    TRANSFER_AMOUNT: 9,
+    STATUS: 10,
+    CREATED_AT: 11,
+    CLOSED_AT: 12,
   }),
 });
 

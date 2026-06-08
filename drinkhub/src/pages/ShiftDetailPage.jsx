@@ -16,7 +16,8 @@ export default function ShiftDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [cashInRegister, setCashInRegister] = useState("0");
+  const [cashAmount, setCashAmount] = useState("0");
+  const [transferAmount, setTransferAmount] = useState("0");
   const [showCloseModal, setShowCloseModal] = useState(false);
 
   useEffect(() => {
@@ -25,9 +26,13 @@ export default function ShiftDetailPage() {
       setShift(foundShift || null);
       setOrders(Array.isArray(state.orders) ? state.orders : []);
       if (foundShift) {
-        setCashInRegister((prev) => {
+        setCashAmount((prev) => {
           if (showCloseModal) return prev;
-          return String(foundShift.totalPaid || foundShift.cashInRegister || 0);
+          return String(foundShift.cashAmount || 0);
+        });
+        setTransferAmount((prev) => {
+          if (showCloseModal) return prev;
+          return String(foundShift.transferAmount || 0);
         });
       }
       setIsLoading(state.loading);
@@ -40,9 +45,8 @@ export default function ShiftDetailPage() {
     const initialOrders = appStore.get("orders") || [];
     setOrders(initialOrders);
     if (foundShift) {
-      setCashInRegister(
-        String(foundShift.totalPaid || foundShift.cashInRegister || 0),
-      );
+      setCashAmount(String(foundShift.cashAmount || 0));
+      setTransferAmount(String(foundShift.transferAmount || 0));
     }
     setIsLoading(appStore.getState().loading);
 
@@ -71,7 +75,9 @@ export default function ShiftDetailPage() {
         0,
       );
 
-      const totalPaid = Number(cashInRegister) || 0;
+      const cashVal = Number(cashAmount) || 0;
+      const transferVal = Number(transferAmount) || 0;
+      const totalPaid = cashVal + transferVal;
 
       const updatedShift = {
         ...shift,
@@ -79,7 +85,9 @@ export default function ShiftDetailPage() {
         endTime: new Date().toISOString(),
         totalRevenue,
         totalPaid,
-        cashInRegister: totalPaid,
+        cashAmount: cashVal,
+        transferAmount: transferVal,
+        cashInRegister: cashVal,
         closedAt: new Date().toISOString(),
       };
 
@@ -137,7 +145,8 @@ export default function ShiftDetailPage() {
     0,
   );
 
-  const variance = Number(cashInRegister) - totalRevenue;
+  const totalPaidDisplay = (Number(cashAmount) || 0) + (Number(transferAmount) || 0);
+  const variance = totalPaidDisplay - totalRevenue;
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -181,7 +190,7 @@ export default function ShiftDetailPage() {
         )}
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
           {/* Opening Cash */}
           <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm">
             <p className="text-xs text-gray-500 mb-1">Tiền mở ca</p>
@@ -195,14 +204,6 @@ export default function ShiftDetailPage() {
             <p className="text-xs text-gray-500 mb-1">Doanh thu</p>
             <p className="text-2xl font-bold text-blue-600">
               {formatCurrency(totalRevenue)}
-            </p>
-          </div>
-
-          {/* Total Paid */}
-          <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm">
-            <p className="text-xs text-gray-500 mb-1">Tiền nhập vào kết</p>
-            <p className="text-2xl font-bold text-purple-600">
-              {formatCurrency(Number(cashInRegister) || 0)}
             </p>
           </div>
 
@@ -225,6 +226,28 @@ export default function ShiftDetailPage() {
               }`}
             >
               {formatCurrency(variance)}
+            </p>
+          </div>
+        </div>
+
+        {/* Cash & Transfer breakdown */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm">
+            <p className="text-xs text-gray-500 mb-1">💵 Tiền mặt trong két</p>
+            <p className="text-2xl font-bold text-orange-600">
+              {formatCurrency(Number(cashAmount) || 0)}
+            </p>
+          </div>
+          <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm">
+            <p className="text-xs text-gray-500 mb-1">🏦 Chuyển khoản</p>
+            <p className="text-2xl font-bold text-indigo-600">
+              {formatCurrency(Number(transferAmount) || 0)}
+            </p>
+          </div>
+          <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-sm">
+            <p className="text-xs text-gray-500 mb-1">Tổng cộng</p>
+            <p className="text-2xl font-bold text-purple-600">
+              {formatCurrency(totalPaidDisplay)}
             </p>
           </div>
         </div>
@@ -294,24 +317,42 @@ export default function ShiftDetailPage() {
             <div className="p-6 space-y-6">
               <div>
                 <label className="block text-sm text-gray-600 mb-2">
-                  Tiền trong kết
+                  💵 Tổng tiền mặt trong két
                 </label>
                 <input
                   type="number"
-                  value={cashInRegister}
-                  onChange={(e) => setCashInRegister(e.target.value)}
+                  value={cashAmount}
+                  onChange={(e) => setCashAmount(e.target.value)}
                   placeholder="0"
                   className="w-full border rounded-2xl px-4 py-3 focus:outline-none focus:border-blue-500 text-lg font-bold"
                 />
-                <p className="text-xs text-gray-500 mt-2">
-                  Doanh thu dự kiến: {formatCurrency(totalRevenue)}
-                </p>
               </div>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">
+                  🏦 Tiền chuyển khoản
+                </label>
+                <input
+                  type="number"
+                  value={transferAmount}
+                  onChange={(e) => setTransferAmount(e.target.value)}
+                  placeholder="0"
+                  className="w-full border rounded-2xl px-4 py-3 focus:outline-none focus:border-blue-500 text-lg font-bold"
+                />
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 space-y-2">
+                <p className="text-sm text-gray-600">
+                  Doanh thu dự kiến: <span className="font-bold text-blue-700">{formatCurrency(totalRevenue)}</span>
+                </p>
+                <p className="text-sm text-gray-600">
+                  Tổng nhập (mặt + CK): <span className="font-bold text-purple-700">{formatCurrency((Number(cashAmount) || 0) + (Number(transferAmount) || 0))}</span>
+                </p>
                 <p className="text-sm font-medium text-blue-900">
                   Chênh lệch:{" "}
-                  {formatCurrency(Number(cashInRegister) - totalRevenue)}
+                  <span className={`font-bold ${((Number(cashAmount) || 0) + (Number(transferAmount) || 0)) - totalRevenue === 0 ? "text-green-600" : "text-red-600"}`}>
+                    {formatCurrency((Number(cashAmount) || 0) + (Number(transferAmount) || 0) - totalRevenue)}
+                  </span>
                 </p>
               </div>
             </div>

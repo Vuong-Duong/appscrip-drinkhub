@@ -119,6 +119,8 @@ const SHEET_SETUP_DEFINITIONS_ = [
       "Tổng doanh thu",
       "Tổng thanh toán",
       "Tiền mặt trong két",
+      "Tiền mặt chốt ca",
+      "Chuyển khoản",
       "Trạng thái",
       "Ngày tạo",
       "Ngày đóng",

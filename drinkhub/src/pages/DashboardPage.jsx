@@ -4,6 +4,8 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import { reportApi } from "../api/Api";
 import { formatCurrency } from "../utils/helpers";
+import BootstrapService from "../services/BootstrapService";
+import appStore from "../services/AppStore";
 
 /* =========================
  * SVG Pie Chart Component
@@ -139,6 +141,171 @@ function PieLegend({ data }) {
 }
 
 /* =========================
+ * Local Calculation Helper (GMT+7 timezone safe)
+ * ========================= */
+const calculateReportLocally = (range, customStart = "", customEnd = "") => {
+  const state = appStore.getState();
+  const allPayments = state.payments || [];
+  const allOrders = state.orders || [];
+  const allOrderDetails = state.orderDetails || [];
+  const allProducts = state.products || [];
+
+  const now = new Date();
+  const gmt7Now = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  
+  const year = gmt7Now.getUTCFullYear();
+  const month = gmt7Now.getUTCMonth();
+  const date = gmt7Now.getUTCDate();
+  
+  const startOfToday = new Date(Date.UTC(year, month, date) - 7 * 60 * 60 * 1000);
+  const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000 - 1);
+
+  let startDate, endDate;
+  if (range === "custom" && customStart && customEnd) {
+    const startParts = customStart.split("-").map(Number);
+    const endParts = customEnd.split("-").map(Number);
+    startDate = new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2]) - 7 * 60 * 60 * 1000);
+    endDate = new Date(Date.UTC(endParts[0], endParts[1] - 1, endParts[2]) - 7 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000 - 1);
+  } else {
+    switch (range) {
+      case "today":
+        startDate = startOfToday;
+        endDate = endOfToday;
+        break;
+      case "yesterday":
+        startDate = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+        endDate = new Date(startOfToday.getTime() - 1);
+        break;
+      case "7days":
+        startDate = new Date(startOfToday.getTime() - 7 * 24 * 60 * 60 * 1000);
+        endDate = endOfToday;
+        break;
+      case "30days":
+        startDate = new Date(startOfToday.getTime() - 30 * 24 * 60 * 60 * 1000);
+        endDate = endOfToday;
+        break;
+      case "thisMonth":
+        startDate = new Date(Date.UTC(year, month, 1) - 7 * 60 * 60 * 1000);
+        endDate = endOfToday;
+        break;
+      case "lastMonth": {
+        const firstDayOfThisMonth = new Date(Date.UTC(year, month, 1) - 7 * 60 * 60 * 1000);
+        endDate = new Date(firstDayOfThisMonth.getTime() - 1);
+        const gmt7LastMonthEnd = new Date(endDate.getTime() + 7 * 60 * 60 * 1000);
+        const lmYear = gmt7LastMonthEnd.getUTCFullYear();
+        const lmMonth = gmt7LastMonthEnd.getUTCMonth();
+        startDate = new Date(Date.UTC(lmYear, lmMonth, 1) - 7 * 60 * 60 * 1000);
+        break;
+      }
+      default:
+        startDate = null;
+        endDate = null;
+    }
+  }
+
+  const isDateInRange = (dateStr) => {
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return false;
+    if (!startDate || !endDate) return true;
+    return d.getTime() >= startDate.getTime() && d.getTime() <= endDate.getTime();
+  };
+
+  const filteredPayments = allPayments.filter((p) => isDateInRange(p.paidAt));
+  const totalRevenue = filteredPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+  const paymentMethods = {};
+  filteredPayments.forEach((p) => {
+    const provider = (p.provider || "cash").trim().toLowerCase();
+    const amount = Number(p.amount) || 0;
+    paymentMethods[provider] = (paymentMethods[provider] || 0) + amount;
+  });
+
+  const paymentMethodsArray = Object.entries(paymentMethods).map(([key, value]) => ({
+    method: key,
+    amount: value,
+    percentage: totalRevenue > 0 ? ((value / totalRevenue) * 100).toFixed(1) : "0.0",
+  }));
+
+  const paidOrderIds = new Set(filteredPayments.map((p) => p.orderId).filter(Boolean));
+  const filteredOrders = allOrders.filter((o) => paidOrderIds.has(o.id));
+
+  const orderDetailsInRange = allOrderDetails.filter((d) => paidOrderIds.has(d.orderId));
+  const topProducts = {};
+  orderDetailsInRange.forEach((d) => {
+    const name = d.productName || "Unknown";
+    const qty = Number(d.quantity) || 0;
+    const sub = Number(d.subtotal) || 0;
+    if (!topProducts[name]) topProducts[name] = { quantity: 0, revenue: 0 };
+    topProducts[name].quantity += qty;
+    topProducts[name].revenue += sub;
+  });
+
+  const topProductsArray = Object.entries(topProducts)
+    .map(([name, data]) => ({
+      productName: name,
+      quantity: data.quantity,
+      revenue: data.revenue,
+    }))
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 10);
+
+  const productCategoryMap = {};
+  allProducts.forEach((p) => {
+    productCategoryMap[p.id] = p.category || "Other";
+  });
+
+  const topCategories = {};
+  orderDetailsInRange.forEach((d) => {
+    const category = productCategoryMap[d.productId] || "Other";
+    const qty = Number(d.quantity) || 0;
+    const sub = Number(d.subtotal) || 0;
+    if (!topCategories[category]) topCategories[category] = { quantity: 0, revenue: 0 };
+    topCategories[category].quantity += qty;
+    topCategories[category].revenue += sub;
+  });
+
+  const topCategoriesArray = Object.entries(topCategories)
+    .map(([name, data]) => ({
+      categoryName: name,
+      quantity: data.quantity,
+      revenue: data.revenue,
+    }))
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 10);
+
+  const revenueByDate = {};
+  filteredPayments.forEach((p) => {
+    if (!p.paidAt) return;
+    const d = new Date(p.paidAt);
+    if (Number.isNaN(d.getTime())) return;
+    const vnDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    const dateKey = vnDate.toISOString().split("T")[0];
+    const amount = Number(p.amount) || 0;
+    revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + amount;
+  });
+
+  const revenueByDateArray = Object.entries(revenueByDate).map(([date, amount]) => ({
+    date,
+    amount,
+  })).sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    period: {
+      range,
+      startDate: startDate ? startDate.toISOString() : null,
+      endDate: endDate ? endDate.toISOString() : null,
+    },
+    totalRevenue,
+    orderCount: filteredOrders.length,
+    paymentMethods: paymentMethodsArray,
+    topProducts: topProductsArray,
+    topCategories: topCategoriesArray,
+    revenueByDate: revenueByDateArray,
+  };
+};
+
+/* =========================
  * Dashboard Page
  * ========================= */
 
@@ -149,59 +316,37 @@ export default function DashboardPage() {
   const [customEnd, setCustomEnd] = useState("");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
 
-  const getCachedReport = (range, start = "", end = "") => {
-    try {
-      const cacheKey =
-        range === "custom"
-          ? `drinkhub:report_custom_${start}_${end}`
-          : `drinkhub:report_${range}`;
-      const cached = localStorage.getItem(cacheKey);
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const [report, setReport] = useState(() => getCachedReport(filterRange));
-  const [isLoading, setIsLoading] = useState(!report);
-  const [error, setError] = useState("");
-
-  const fetchReport = async (filters = {}) => {
-    const range = filters.range || "today";
-    const cacheKey =
-      range === "custom"
-        ? `drinkhub:report_custom_${filters.customStart || ""}_${filters.customEnd || ""}`
-        : `drinkhub:report_${range}`;
-
-    let cachedData = null;
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (raw) cachedData = JSON.parse(raw);
-    } catch {}
-
-    if (cachedData) {
-      setReport(cachedData);
-      setIsLoading(false);
-    } else {
-      setIsLoading(true);
-      setReport(null); // Clear old data if no cache exists for this selection
-    }
-    setError("");
-
-    try {
-      const data = await reportApi.getReport(filters);
-      setReport(data);
-      localStorage.setItem(cacheKey, JSON.stringify(data));
-    } catch (err) {
-      setError(err.details || err.code || err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Load local report calculations reactively
+  const [report, setReport] = useState(() => calculateReportLocally("today"));
+  const [storeState, setStoreState] = useState(() => appStore.getState());
 
   useEffect(() => {
-    fetchReport({ range: filterRange });
-  }, [filterRange]);
+    // Refresh latest data from backend in background when visiting dashboard
+    const refreshData = async () => {
+      try {
+        await BootstrapService.forceRefresh();
+      } catch (err) {
+        console.error("Failed to refresh data for dashboard:", err);
+      }
+    };
+    refreshData();
+  }, []);
+
+  useEffect(() => {
+    const handleStateChange = (state) => {
+      setStoreState({ ...state });
+      const data = calculateReportLocally(filterRange, customStart, customEnd);
+      setReport(data);
+    };
+
+    // Subscribe to store updates
+    const unsubscribe = appStore.subscribe(handleStateChange);
+    
+    // Initial calculation
+    handleStateChange(appStore.getState());
+
+    return unsubscribe;
+  }, [filterRange, customStart, customEnd]);
 
   const handleApplyCustomFilter = () => {
     if (!customStart || !customEnd) {
@@ -212,11 +357,9 @@ export default function DashboardPage() {
       alert("Ngày bắt đầu không được lớn hơn ngày kết thúc");
       return;
     }
-    fetchReport({
-      range: "custom",
-      customStart,
-      customEnd,
-    });
+    setFilterRange("custom");
+    const data = calculateReportLocally("custom", customStart, customEnd);
+    setReport(data);
     setShowCustomFilter(false);
   };
 
@@ -236,12 +379,13 @@ export default function DashboardPage() {
     } else {
       setFilterRange(value);
       setShowCustomFilter(false);
-      // Load cached report immediately to make transition instant
-      const cached = getCachedReport(value);
-      setReport(cached);
-      setIsLoading(!cached);
+      const data = calculateReportLocally(value);
+      setReport(data);
     }
   };
+
+  const isLoading = storeState.loading;
+  const error = storeState.error || "";
 
   // Prepare pie chart data
   const paymentPieData =
@@ -365,6 +509,39 @@ export default function DashboardPage() {
                 <div className="text-6xl opacity-20">💰</div>
               </div>
             </div>
+            {/* Revenue By Date */}
+            {report.revenueByDate && report.revenueByDate.length > 0 && (
+              <div className="bg-white rounded-3xl p-6 border border-gray-200 shadow-sm">
+                <h3 className="text-lg font-bold text-gray-900 mb-6">
+                  DOANH THU THEO NGÀY
+                </h3>
+                <div className="space-y-4 max-h-[350px] overflow-y-auto pr-1">
+                  {report.revenueByDate.map((item, idx) => {
+                    const maxAmount = Math.max(...report.revenueByDate.map((d) => d.amount), 1);
+                    const pct = (item.amount / maxAmount) * 100;
+                    return (
+                      <div key={idx} className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
+                        <div className="w-24 text-sm font-semibold text-gray-600">
+                          {new Date(item.date).toLocaleDateString("vi-VN", {
+                            day: "2-digit",
+                            month: "2-digit",
+                          })}
+                        </div>
+                        <div className="flex-1 min-w-[150px] bg-gray-100 rounded-full h-3 relative overflow-hidden">
+                          <div
+                            className="bg-blue-500 h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          ></div>
+                        </div>
+                        <div className="text-right min-w-[120px] text-sm font-bold text-gray-800">
+                          {formatCurrency(item.amount)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Main Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

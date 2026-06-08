@@ -134,6 +134,8 @@ const VN_TO_EN_HEADER_MAP_ = {
     "Tổng doanh thu": "totalRevenue",
     "Tổng thanh toán": "totalPaid",
     "Tiền mặt trong két": "cashInRegister",
+    "Tiền mặt chốt ca": "cashAmount",
+    "Chuyển khoản": "transferAmount",
     "Trạng thái": "status",
     "Ngày tạo": "createdAt",
     "Ngày đóng": "closedAt",

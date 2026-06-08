@@ -217,6 +217,22 @@ export default function ShiftManagementPage() {
                       {formatCurrency(shift.totalRevenue)}
                     </p>
                   </div>
+                  {shift.status === "closed" && (
+                    <>
+                      <div>
+                        <p className="text-xs text-gray-500">💵 Tiền mặt</p>
+                        <p className="text-base font-bold text-orange-600">
+                          {formatCurrency(shift.cashAmount || 0)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">🏦 Chuyển khoản</p>
+                        <p className="text-base font-bold text-indigo-600">
+                          {formatCurrency(shift.transferAmount || 0)}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </button>
             ))}

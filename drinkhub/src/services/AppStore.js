@@ -19,6 +19,7 @@ class AppStore {
       categories: [],
       shifts: [],
       orderDetails: [],
+      payments: [],
 
       // UI state
       loading: false,
@@ -51,6 +52,7 @@ class AppStore {
         "categories",
         "shifts",
         "orderDetails",
+        "payments",
       ];
 
       entities.forEach((entity) => {

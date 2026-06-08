@@ -20,6 +20,8 @@ const getShifts = (filters = {}) => {
           totalRevenue: toNumber_(row[SHEET_SCHEMA.SHIFT.TOTAL_REVENUE]),
           totalPaid: toNumber_(row[SHEET_SCHEMA.SHIFT.TOTAL_PAID]),
           cashInRegister: toNumber_(row[SHEET_SCHEMA.SHIFT.CASH_IN_REGISTER]),
+          cashAmount: toNumber_(row[SHEET_SCHEMA.SHIFT.CASH_AMOUNT]),
+          transferAmount: toNumber_(row[SHEET_SCHEMA.SHIFT.TRANSFER_AMOUNT]),
           status: trimSafe_(row[SHEET_SCHEMA.SHIFT.STATUS]),
           createdAt: trimSafe_(row[SHEET_SCHEMA.SHIFT.CREATED_AT]),
           closedAt: trimSafe_(row[SHEET_SCHEMA.SHIFT.CLOSED_AT]),
@@ -55,6 +57,8 @@ const createShift = (payload = {}) => {
       0,
       0,
       0,
+      0,
+      0,
       "open",
       now,
       "",
@@ -72,6 +76,8 @@ const createShift = (payload = {}) => {
       totalRevenue: 0,
       totalPaid: 0,
       cashInRegister: 0,
+      cashAmount: 0,
+      transferAmount: 0,
       status: "open",
       createdAt: now,
       closedAt: "",
@@ -109,6 +115,12 @@ const closeShift = (shiftId, payload = {}) => {
     row[SHEET_SCHEMA.SHIFT.CASH_IN_REGISTER] = toNumber_(
       payload.cashInRegister || 0,
     );
+    row[SHEET_SCHEMA.SHIFT.CASH_AMOUNT] = toNumber_(
+      payload.cashAmount || 0,
+    );
+    row[SHEET_SCHEMA.SHIFT.TRANSFER_AMOUNT] = toNumber_(
+      payload.transferAmount || 0,
+    );
     row[SHEET_SCHEMA.SHIFT.STATUS] = "closed";
     row[SHEET_SCHEMA.SHIFT.CLOSED_AT] = now;
 
@@ -124,6 +136,8 @@ const closeShift = (shiftId, payload = {}) => {
       totalRevenue: toNumber_(row[SHEET_SCHEMA.SHIFT.TOTAL_REVENUE]),
       totalPaid: toNumber_(row[SHEET_SCHEMA.SHIFT.TOTAL_PAID]),
       cashInRegister: toNumber_(row[SHEET_SCHEMA.SHIFT.CASH_IN_REGISTER]),
+      cashAmount: toNumber_(row[SHEET_SCHEMA.SHIFT.CASH_AMOUNT]),
+      transferAmount: toNumber_(row[SHEET_SCHEMA.SHIFT.TRANSFER_AMOUNT]),
       status: "closed",
       createdAt: trimSafe_(row[SHEET_SCHEMA.SHIFT.CREATED_AT]),
       closedAt: now,
