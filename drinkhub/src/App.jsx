@@ -18,6 +18,7 @@ import Login from "./pages/Login";
 import FeaturePage from "./pages/FeaturePage";
 import MenuManagementPage from "./pages/MenuManagementPage";
 import DiscountManagementPage from "./pages/DiscountManagementPage";
+import CustomerDisplayPage from "./pages/CustomerDisplayPage";
 import { authApi } from "./api/Api";
 import {
   clearStoredAuthSession,
@@ -124,6 +125,7 @@ function App() {
     <HashRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/customer-display" element={<CustomerDisplayPage />} />
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/khu-vuc" element={<KhuVucPage />} />

@@ -6,6 +6,7 @@
 import StorageService from "./StorageService.js";
 import AppStore from "./AppStore.js";
 import ApiService from "./ApiService.js";
+import { request } from "../api/Api.js";
 
 let _initialized = false;
 
@@ -110,28 +111,63 @@ class BootstrapService {
   /**
    * Background refresh if cache is stale (> 24h)
    * Non-blocking, UI still renders from cache
-   * Does NOT set loading=true to avoid flickering
+   * NEVER touches orders, orderDetails, tables to protect local order state
    */
   static _backgroundRefresh() {
-    // Don't await, let it run in background
     setTimeout(async () => {
       try {
         console.log("[Bootstrap] Background refresh starting...");
-        const freshData = await ApiService.refreshAll();
+        const freshData = await request("GET_ALL_DATA_FOR_CACHE");
 
         if (freshData) {
-          AppStore.loadAll(freshData);
-          console.log("[Bootstrap] Background refresh complete");
+          this._safeRefresh(freshData);
+          console.log("[Bootstrap] Background refresh complete (safe)");
         }
       } catch (e) {
         console.error("[Bootstrap] Background refresh error:", e);
-        // Don't throw, silently fail - user already has stale data
       }
     }, 500);
   }
 
   /**
+   * Safe refresh: only update reference data (products, discounts, settings, etc.)
+   * NEVER overwrites orders, orderDetails, or tables — those are managed by the order flow.
+   */
+  static _safeRefresh(freshData) {
+    // Only update these safe entities — order-related data is off-limits
+    const safeEntities = ["products", "discounts", "settings", "users", "categories", "shifts", "payments"];
+
+    safeEntities.forEach((entity) => {
+      if (freshData[entity] !== undefined) {
+        AppStore.set(entity, freshData[entity], true);
+      }
+    });
+
+    // Update tables from server BUT preserve local occupied status
+    if (freshData.tables) {
+      const currentTables = AppStore.get("tables") || [];
+      const localOccupiedMap = new Map();
+      currentTables.forEach((t) => {
+        if (t.status === "occupied" && t.currentOrderId) {
+          localOccupiedMap.set(String(t.id), t.currentOrderId);
+        }
+      });
+
+      const mergedTables = freshData.tables.map((t) => {
+        const localOrderId = localOccupiedMap.get(String(t.id));
+        if (localOrderId) {
+          return { ...t, status: "occupied", currentOrderId: localOrderId };
+        }
+        return t;
+      });
+
+      AppStore.set("tables", mergedTables, true);
+    }
+  }
+
+  /**
    * Force full refresh (for refresh button)
+   * Also uses safe refresh to protect order data
    */
   static async forceRefresh() {
     try {
@@ -140,7 +176,7 @@ class BootstrapService {
 
       const freshData = await ApiService.refreshAll();
       if (freshData) {
-        AppStore.loadAll(freshData);
+        this._safeRefresh(freshData);
       }
     } catch (e) {
       console.error("[Bootstrap] Force refresh error:", e);

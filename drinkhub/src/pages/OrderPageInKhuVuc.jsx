@@ -7,6 +7,7 @@ import { getStoredAuthUser } from "../utils/auth";
 import { printReceipt } from "../utils/receipt";
 import appStore from "../services/AppStore";
 import CrudService from "../services/CrudService";
+import CustomerDisplayService from "../services/CustomerDisplayService";
 
 const normalizeCategoryId = (value) =>
   String(value || "khac")
@@ -39,7 +40,9 @@ export default function OrderPage() {
   const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
   const [outOfStockSearch, setOutOfStockSearch] = useState("");
   const [confirmOutOfStock, setConfirmOutOfStock] = useState({ isOpen: false, product: null });
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState({ isOpen: false, item: null });
   const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
+  const [isConfirmedForDisplay, setIsConfirmedForDisplay] = useState(false);
 
   const showToast = (message, type = "success") => {
     setToast({ isOpen: true, message, type });
@@ -73,6 +76,14 @@ export default function OrderPage() {
 
     return unsubscribe;
   }, []);
+
+  // Reset customer display when leaving order page
+  useEffect(() => {
+    return () => {
+      CustomerDisplayService.sendReset();
+    };
+  }, []);
+
 
   const selectedTable = tables.find(
     (table) => String(table.id) === String(decodedTableId),
@@ -255,6 +266,44 @@ export default function OrderPage() {
     }
   }, [subtotal, appliedDiscountCode, existingOrder]);
 
+  // --- Confirm order and send to Customer Display ---
+  const handleConfirmOrder = () => {
+    if (!selectedTable) return;
+    if (cart.length === 0 && !hasExistingOrder) return;
+
+    const existingItems = hasExistingOrder
+      ? (existingOrder?.items || []).map((item) => ({
+          name: item.productName || item.name,
+          quantity: item.quantity,
+          price: Number(item.unitPrice || 0),
+          total: Number(item.subtotal || 0),
+        }))
+      : [];
+
+    const newItems = cart.map((item) => ({
+      name: item.name,
+      quantity: item.quantity,
+      price: Number(item.price || 0),
+      total: Number(item.price || 0) * item.quantity,
+    }));
+
+    const allItems = [...existingItems, ...newItems];
+    const orderId = existingOrder ? existingOrder.id : `temp_${Date.now()}`;
+
+    CustomerDisplayService.sendOrdering({
+      tableName: selectedTable.name || `Bàn ${decodedTableId}`,
+      items: allItems,
+      subtotal,
+      discount: safeDiscount,
+      total,
+      paymentMethod,
+      orderId,
+      settings: storeInfo,
+    });
+
+    setIsConfirmedForDisplay(true);
+  };
+
   // === CHECKOUT: navigate to BillSummary (PAY_NOW flow) ===
   const handleCheckout = () => {
     if (!hasExistingOrder && cart.length === 0) return;
@@ -420,28 +469,32 @@ export default function OrderPage() {
       orderApi
         .createOrder(orderPayload)
         .then((serverOrder) => {
-          // Replace temp order and details with server order
-          const latestOrders = appStore.get("orders") || [];
-          const filtered = latestOrders.filter((o) => o.id !== tempOrderId);
-          appStore.set("orders", [...filtered, serverOrder]);
+          // Safely update: remap temp IDs to server IDs without wiping data
+          const serverOrderId = serverOrder.id;
 
+          // Update order: change temp ID to server ID, keep all other data
+          const latestOrders = appStore.get("orders") || [];
+          appStore.set("orders", latestOrders.map((o) =>
+            o.id === tempOrderId
+              ? { ...o, ...serverOrder, id: serverOrderId }
+              : o
+          ));
+
+          // Update orderDetails: remap orderId from temp to server ID (keep local items intact)
           const latestDetails = appStore.get("orderDetails") || [];
-          const detailsFiltered = latestDetails.filter(
-            (d) => d.orderId !== tempOrderId,
-          );
-          const serverDetails = serverOrder.items || [];
-          appStore.set("orderDetails", [...detailsFiltered, ...serverDetails]);
+          appStore.set("orderDetails", latestDetails.map((d) =>
+            d.orderId === tempOrderId
+              ? { ...d, orderId: serverOrderId }
+              : d
+          ));
 
           // Update table with server order ID
           const latestTables = appStore.get("tables") || [];
-          appStore.set(
-            "tables",
-            latestTables.map((t) =>
-              String(t.id) === String(decodedTableId)
-                ? { ...t, currentOrderId: serverOrder.id }
-                : t,
-            ),
-          );
+          appStore.set("tables", latestTables.map((t) =>
+            String(t.id) === String(decodedTableId)
+              ? { ...t, currentOrderId: serverOrderId }
+              : t
+          ));
         })
         .catch((err) => {
           console.error("Failed to sync pay later order:", err);
@@ -520,34 +573,27 @@ export default function OrderPage() {
         .addItems(orderId, newItems, safeDiscount)
         .then((result) => {
           // result is { orderId, subtotal, discount, grandTotal, addedItems }
+          // Update order totals from server
           const latestOrders = appStore.get("orders") || [];
-          appStore.set(
-            "orders",
-            latestOrders.map((o) =>
-              o.id === orderId
-                ? {
-                    ...o,
-                    subtotal: result.subtotal,
-                    discount: result.discount,
-                    grandTotal: result.grandTotal,
-                  }
-                : o,
-            ),
-          );
+          appStore.set("orders", latestOrders.map((o) =>
+            o.id === orderId
+              ? { ...o, subtotal: result.subtotal, discount: result.discount, grandTotal: result.grandTotal }
+              : o
+          ));
 
-          const latestDetails = appStore.get("orderDetails") || [];
-          const tempDetailIds = new Set(tempDetails.map((t) => t.id));
-          const detailsFiltered = latestDetails.filter(
-            (d) => !tempDetailIds.has(d.id),
-          );
-          const serverItems = (result.addedItems || []).map((item) => ({
-            ...item,
-            orderId: orderId,
-          }));
-          appStore.set("orderDetails", [
-            ...detailsFiltered,
-            ...serverItems,
-          ]);
+          // Only update details if server returned addedItems, otherwise keep local data
+          if (result.addedItems && result.addedItems.length > 0) {
+            const latestDetails = appStore.get("orderDetails") || [];
+            const tempDetailIds = new Set(tempDetails.map((t) => t.id));
+            const detailsFiltered = latestDetails.filter(
+              (d) => !tempDetailIds.has(d.id),
+            );
+            const serverItems = result.addedItems.map((item) => ({
+              ...item,
+              orderId: orderId,
+            }));
+            appStore.set("orderDetails", [...detailsFiltered, ...serverItems]);
+          }
         })
         .catch((err) => {
           console.error("Failed to sync added items:", err);
@@ -561,6 +607,55 @@ export default function OrderPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // === DELETE EXISTING ITEM (with confirmation) ===
+  const handleDeleteExistingItem = (item) => {
+    if (!hasExistingOrder || !item) return;
+    const orderId = existingOrder.id;
+
+    // Remove item from orderDetails in AppStore
+    const currentDetails = appStore.get("orderDetails") || [];
+    const updatedDetails = currentDetails.filter(
+      (d) => !(d.orderId === orderId && d.productId === item.productId)
+    );
+    appStore.set("orderDetails", updatedDetails);
+
+    // Recalculate order totals
+    const remainingItems = updatedDetails.filter((d) => d.orderId === orderId);
+    const newSubtotal = remainingItems.reduce(
+      (sum, d) => sum + Number(d.subtotal || 0), 0
+    );
+    const currentOrders = appStore.get("orders") || [];
+
+    if (remainingItems.length === 0) {
+      // No items left -> remove order, free table
+      appStore.set("orders", currentOrders.filter((o) => o.id !== orderId));
+      const currentTables = appStore.get("tables") || [];
+      appStore.set("tables", currentTables.map((t) =>
+        String(t.id) === String(decodedTableId)
+          ? { ...t, status: "available", currentOrderId: "" }
+          : t
+      ));
+    } else {
+      // Recalc order
+      appStore.set("orders", currentOrders.map((o) =>
+        o.id === orderId
+          ? { ...o, subtotal: newSubtotal, grandTotal: newSubtotal - (o.discount || 0) }
+          : o
+      ));
+    }
+
+    // Restore stock
+    const updatedProducts = products.map((p) => {
+      if (p.id === item.productId) {
+        return { ...p, stock: p.stock + item.quantity };
+      }
+      return p;
+    });
+    appStore.set("products", updatedProducts);
+
+    showToast(`Đã xóa "${item.productName}" khỏi đơn hàng`);
   };
 
   return (
@@ -779,7 +874,7 @@ export default function OrderPage() {
               </button>
             </div>
 
-            {/* Existing order items (read-only) */}
+            {/* Existing order items */}
             {hasExistingOrder && existingOrder.items?.length > 0 && (
               <div className="p-5 border-b bg-gray-50">
                 <p className="text-sm font-semibold text-gray-600 mb-3">
@@ -788,13 +883,22 @@ export default function OrderPage() {
                 {existingOrder.items.map((item, idx) => (
                   <div
                     key={`existing-${idx}`}
-                    className="flex justify-between py-2 text-sm text-gray-600"
+                    className="flex items-center justify-between py-2 text-sm text-gray-600"
                   >
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p>{item.productName}</p>
                       <p className="text-xs text-gray-400">x{item.quantity}</p>
                     </div>
-                    <p>{formatCurrency(Number(item.subtotal || 0))}</p>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <p>{formatCurrency(Number(item.subtotal || 0))}</p>
+                      <button
+                        onClick={() => setConfirmDeleteItem({ isOpen: true, item })}
+                        className="w-7 h-7 rounded-full bg-red-100 text-red-500 hover:bg-red-200 flex items-center justify-center text-sm font-bold transition"
+                        title="Xóa món"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
                 ))}
                 <div className="flex justify-between pt-2 border-t mt-2 text-sm font-medium">
@@ -898,20 +1002,35 @@ export default function OrderPage() {
                 </button>
               </div>
 
-              {/* Nút Thanh toán */}
-              <button
-                onClick={handleCheckout}
-                disabled={
-                  (cart.length === 0 && !hasExistingOrder) || isSubmitting
-                }
-                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-2xl font-bold text-lg transition mb-3"
-              >
-                {isSubmitting
-                  ? "Đang xử lý..."
-                  : `Thanh toán ${paymentMethod === "cash" ? "tiền mặt" : "chuyển khoản"}`}
-              </button>
+              {/* Nút Xác nhận đơn - gửi cho khách xem */}
+              {!isConfirmedForDisplay && (
+                <button
+                  onClick={handleConfirmOrder}
+                  disabled={
+                    (cart.length === 0 && !hasExistingOrder) || isSubmitting
+                  }
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white py-4 rounded-2xl font-bold text-lg transition mb-3"
+                >
+                  ✅ Xác nhận đơn cho khách xem
+                </button>
+              )}
 
-              {/* Nút Thanh toán sau (chỉ khi có món trong cart) */}
+              {/* Nút Thanh toán - chỉ hiện sau khi xác nhận */}
+              {isConfirmedForDisplay && (
+                <button
+                  onClick={handleCheckout}
+                  disabled={
+                    (cart.length === 0 && !hasExistingOrder) || isSubmitting
+                  }
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white py-4 rounded-2xl font-bold text-lg transition mb-3"
+                >
+                  {isSubmitting
+                    ? "Đang xử lý..."
+                    : `💳 Thanh toán ${paymentMethod === "cash" ? "tiền mặt" : "chuyển khoản"}`}
+                </button>
+              )}
+
+              {/* Nút Gọi thêm món (chỉ khi có món trong cart) */}
               {cart.length > 0 && (
                 <button
                   onClick={hasExistingOrder ? handleAddItems : handlePayLater}
@@ -920,9 +1039,7 @@ export default function OrderPage() {
                 >
                   {isSubmitting
                     ? "Đang xử lý..."
-                    : hasExistingOrder
-                      ? "➕ Gọi thêm món"
-                      : "⏳ Thanh toán sau"}
+                    : "➕ Gọi thêm món"}
                 </button>
               )}
             </div>
@@ -1259,6 +1376,41 @@ export default function OrderPage() {
                 className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-2xl transition-all shadow-md active:scale-95 cursor-pointer"
               >
                 Đồng ý
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmDeleteItem.isOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-sm mx-4 p-6 shadow-2xl">
+            <div className="text-center">
+              <span className="text-4xl">⚠️</span>
+              <h3 className="text-xl font-bold text-gray-900 mt-3">Xác nhận xóa món</h3>
+              <p className="text-gray-500 text-sm mt-2">
+                Món <strong className="text-gray-800 font-semibold">"{confirmDeleteItem.item?.productName}"</strong> đã được gửi ra bar/bếp.
+              </p>
+              <p className="text-red-500 text-xs font-semibold mt-2">
+                Bạn có chắc chắn muốn xóa khỏi đơn hàng không?
+              </p>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setConfirmDeleteItem({ isOpen: false, item: null })}
+                className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-2xl transition-all cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={() => {
+                  const item = confirmDeleteItem.item;
+                  setConfirmDeleteItem({ isOpen: false, item: null });
+                  handleDeleteExistingItem(item);
+                }}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-2xl transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                Xóa món
               </button>
             </div>
           </div>

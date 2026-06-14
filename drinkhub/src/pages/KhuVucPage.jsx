@@ -4,6 +4,7 @@ import Header from "../components/Header";
 import Footer from "../components/Footer";
 import appStore from "../services/AppStore";
 import BootstrapService from "../services/BootstrapService";
+import CustomerDisplayService from "../services/CustomerDisplayService";
 
 export default function TablePage() {
   const navigate = useNavigate();
@@ -12,6 +13,11 @@ export default function TablePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
+
+  // Reset customer display to welcome state when entering table dashboard
+  useEffect(() => {
+    CustomerDisplayService.sendReset();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = appStore.subscribe((state) => {

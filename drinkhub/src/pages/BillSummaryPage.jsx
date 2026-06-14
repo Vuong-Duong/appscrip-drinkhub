@@ -6,6 +6,7 @@ import { orderApi, paymentApi } from "../api/Api";
 import { formatCurrency } from "../utils/helpers";
 import { printReceipt } from "../utils/receipt";
 import appStore from "../services/AppStore";
+import CustomerDisplayService from "../services/CustomerDisplayService";
 
 export default function BillSummaryPage() {
   const navigate = useNavigate();
@@ -31,6 +32,29 @@ export default function BillSummaryPage() {
     const info = appStore.get("settings") || {};
     setStoreInfo(info);
   }, [orderData]);
+
+  // Update customer display to checkout state
+  useEffect(() => {
+    if (!orderData) return;
+
+    const orderId = orderData.existingOrderId || `ord_${Date.now()}`;
+
+    CustomerDisplayService.sendCheckout({
+      tableName: orderData.tableName,
+      items: orderData.items.map((i) => ({
+        name: i.productName || i.name,
+        quantity: i.quantity,
+        price: i.unitPrice || i.price,
+        total: i.subtotal,
+      })),
+      subtotal: orderData.subtotal,
+      discount: orderData.discount,
+      total: orderData.grandTotal,
+      paymentMethod: orderData.paymentMethod,
+      orderId,
+      settings: storeInfo,
+    });
+  }, [orderData, storeInfo]);
 
   const handlePrintReceipt = () => {
     const receiptId =
@@ -156,42 +180,75 @@ export default function BillSummaryPage() {
       const syncProcess = async () => {
         try {
           let finalOrderId = orderId;
+          let finalAmount = amount;
+          const isLocalTempId = String(orderId).startsWith("ord_local_");
 
-          if (!orderData.existingOrderId) {
-            // New order
+          if (!orderData.existingOrderId || isLocalTempId) {
+            // New order OR local temp order not yet synced to server
             const serverOrder = await orderApi.createOrder(orderData);
             finalOrderId = serverOrder.id;
+            // Use server's grandTotal to avoid amount mismatch
+            finalAmount = Number(serverOrder.grandTotal) || amount;
           } else if (
             orderData.newCartItems &&
             orderData.newCartItems.length > 0
           ) {
-            // Existing order + new items
-            await orderApi.addItems(
+            // Existing server order + new items
+            const result = await orderApi.addItems(
               orderData.existingOrderId,
               orderData.newCartItems,
               orderData.discount,
             );
+            // Use server's updated grandTotal
+            finalAmount = Number(result.grandTotal) || amount;
           }
 
-          // Process payment
-          await paymentApi.processPayment({
+          // Process payment with retry on timeout
+          const paymentPayload = {
             provider: orderData.paymentMethod,
             orderId: finalOrderId,
-            amount: amount,
+            amount: finalAmount,
             transactionId: `${orderData.paymentMethod}_${finalOrderId}_${Date.now()}`,
-          });
+          };
+
+          try {
+            await paymentApi.processPayment(paymentPayload);
+          } catch (payErr) {
+            if (payErr?.code === "REQUEST_TIMEOUT") {
+              console.log("Payment timeout, retrying once...");
+              await new Promise((r) => setTimeout(r, 2000));
+              try {
+                await paymentApi.processPayment(paymentPayload);
+              } catch (retryErr) {
+                // ORDER_ALREADY_FROZEN means first attempt succeeded, ignore
+                if (retryErr?.code !== "ORDER_ALREADY_FROZEN") throw retryErr;
+                console.log("Payment already processed (frozen), sync OK");
+              }
+            } else if (payErr?.code === "ORDER_ALREADY_FROZEN") {
+              // Already paid, treat as success
+              console.log("Payment already processed (frozen), sync OK");
+            } else {
+              throw payErr;
+            }
+          }
 
           console.log(
             `Background payment sync succeeded for order: ${finalOrderId}`,
           );
         } catch (err) {
           console.error("Failed to sync payment in background:", err);
-          appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
+          // Don't show error for timeout or already-frozen
+          if (err?.code !== "REQUEST_TIMEOUT" && err?.code !== "ORDER_ALREADY_FROZEN") {
+            appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
+          }
         }
       };
 
       // Run sync in background (fire-and-forget)
       syncProcess();
+
+      // Show success screen on customer display
+      CustomerDisplayService.sendSuccess();
 
       // 3. Redirect to KhuVucPage immediately
       navigate("/khu-vuc", { replace: true });

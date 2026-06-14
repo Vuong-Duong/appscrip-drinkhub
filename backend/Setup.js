@@ -213,6 +213,9 @@ const ensureStoreInfoKeys_ = (sheet) => {
     { key: "STORE_NAME", defaultValue: "DrinkHub Shop" },
     { key: "ADDRESS", defaultValue: "Chưa có địa chỉ" },
     { key: "STORE_ID", defaultValue: "POS_001" },
+    { key: "BANK_ID", defaultValue: "MB" },
+    { key: "BANK_ACCOUNT", defaultValue: "1234567890" },
+    { key: "BANK_OWNER", defaultValue: "QUYNH ANH" },
   ];
 
   requiredKeys.forEach((item) => {

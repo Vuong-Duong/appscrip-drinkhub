@@ -9,7 +9,7 @@ const features = [
   { num: "6", title: "Quản lý máy in", icon: "🖨️", route: "/feature/7" },
   { num: "7", title: "Quản lý khu vực", icon: "🗺️", route: "/khu-vuc" },
   { num: "8", title: "Báo hết món", icon: "🚫", route: "/feature/10" },
-  { num: "9", title: "Cấu hình màn hình 2", icon: "🖥️", route: "/feature/11" },
+  { num: "9", title: "Cấu hình màn hình 2", icon: "🖥️", route: "/customer-display" },
   { num: "10", title: "Nhật ký Order", icon: "📋", route: "/order-history" },
   { num: "11", title: "Xuất mã vạch", icon: "🏷️", route: "/feature/14" },
   { num: "12", title: "Quản lý thiết bị", icon: "📟", route: "/feature/16" },
