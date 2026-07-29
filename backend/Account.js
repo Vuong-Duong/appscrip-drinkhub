@@ -1,5 +1,5 @@
 /* =========================
- * Account.js - Quản lý tài khoản
+ * Account.js - Quản lý tài khoản - Firestore
  * ========================= */
 
 // =========================
@@ -37,21 +37,21 @@ const checkPermission = (userRole, allowedRoles = ADMIN_ONLY_ROLES) => {
 const getAllAccounts = (userRole) => {
   checkPermission(userRole, ADMIN_ONLY_ROLES);
 
-  const rows = getSheetData_(SHEET_NAME.ACCOUNT);
+  const docs = firestoreQuery_("accounts");
   const accounts = [];
 
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const status = trimSafe_(row[SHEET_SCHEMA.ACCOUNT.ROLE]);
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    const role = trimSafe_(doc.role);
 
-    if (status === "DELETED") continue;
+    if (role === "DELETED") continue;
 
     accounts.push({
-      id: trimSafe_(row[SHEET_SCHEMA.ACCOUNT.ID]),
-      username: trimSafe_(row[SHEET_SCHEMA.ACCOUNT.USERNAME]),
-      role: trimSafe_(row[SHEET_SCHEMA.ACCOUNT.ROLE]),
-      createdAt: trimSafe_(row[SHEET_SCHEMA.ACCOUNT.CREATED_AT]),
-      lastLogin: trimSafe_(row[SHEET_SCHEMA.ACCOUNT.LAST_LOGIN]),
+      id: trimSafe_(doc.id),
+      username: trimSafe_(doc.username),
+      role: role,
+      createdAt: trimSafe_(doc.createdAt),
+      lastLogin: trimSafe_(doc.lastLogin),
     });
   }
 
@@ -62,18 +62,17 @@ const getAllAccounts = (userRole) => {
  * Lấy thông tin 1 tài khoản (không return password)
  */
 const getAccount = (accountId) => {
-  const row = findRowById_(SHEET_NAME.ACCOUNT, accountId);
-  if (!row) {
+  const doc = firestoreGet_("accounts", accountId);
+  if (!doc) {
     return null;
   }
 
-  const values = row.values;
   return {
-    id: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.ID]),
-    username: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.USERNAME]),
-    role: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.ROLE]),
-    createdAt: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.CREATED_AT]),
-    lastLogin: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.LAST_LOGIN]),
+    id: trimSafe_(doc.id),
+    username: trimSafe_(doc.username),
+    role: trimSafe_(doc.role),
+    createdAt: trimSafe_(doc.createdAt),
+    lastLogin: trimSafe_(doc.lastLogin),
   };
 };
 
@@ -94,11 +93,11 @@ const createAccount = (userRole, username, password, role = "staff") => {
 
   return withPaymentLock_("account_create", () => {
     // Kiểm tra trùng username
-    const rows = getSheetData_(SHEET_NAME.ACCOUNT, false);
-    for (let i = 1; i < rows.length; i++) {
+    const allDocs = firestoreQuery_("accounts");
+    for (let i = 0; i < allDocs.length; i++) {
       if (
-        trimSafe_(rows[i][SHEET_SCHEMA.ACCOUNT.USERNAME]) === username &&
-        trimSafe_(rows[i][SHEET_SCHEMA.ACCOUNT.ROLE]) !== "DELETED"
+        trimSafe_(allDocs[i].username) === username &&
+        trimSafe_(allDocs[i].role) !== "DELETED"
       ) {
         throw new Error("USERNAME_ALREADY_EXISTS");
       }
@@ -107,9 +106,14 @@ const createAccount = (userRole, username, password, role = "staff") => {
     const accountId = generateId_("acc");
     const now = toIsoString_(new Date());
 
-    appendRowsBatch_(SHEET_NAME.ACCOUNT, [
-      [accountId, username, password, role, now, ""],
-    ]);
+    firestoreSet_("accounts", accountId, {
+      id: accountId,
+      username: username,
+      password: password,
+      role: role,
+      createdAt: now,
+      lastLogin: "",
+    });
 
     logAction_("CREATE_ACCOUNT", `ACCOUNT_${accountId}`, "system", {
       username: username,
@@ -139,61 +143,60 @@ const updateAccount = (userRole, accountId, data = {}) => {
   }
 
   return withPaymentLock_(`account_${accountId}`, () => {
-    const row = findRowById_(SHEET_NAME.ACCOUNT, accountId);
-    if (!row) {
+    const doc = firestoreGet_("accounts", accountId);
+    if (!doc) {
       throw new Error("ACCOUNT_NOT_FOUND");
     }
 
-    const values = row.values;
-    const oldRole = trimSafe_(values[SHEET_SCHEMA.ACCOUNT.ROLE]);
+    const oldRole = trimSafe_(doc.role);
 
     if (oldRole === "DELETED") {
       throw new Error("ACCOUNT_DELETED");
     }
 
+    const updates = {};
+
     // Update fields nếu có
     if (data.password) {
-      values[SHEET_SCHEMA.ACCOUNT.PASSWORD] = trimSafe_(data.password);
+      updates.password = trimSafe_(data.password);
     }
 
     if (data.role) {
       if (!["admin", "staff", "cashier"].includes(data.role)) {
         throw new Error("INVALID_ROLE");
       }
-      values[SHEET_SCHEMA.ACCOUNT.ROLE] = data.role;
+      updates.role = data.role;
     }
 
     if (data.username) {
-      const rows = getSheetData_(SHEET_NAME.ACCOUNT, false);
-      for (let i = 1; i < rows.length; i++) {
-        const existingUsername = trimSafe_(
-          rows[i][SHEET_SCHEMA.ACCOUNT.USERNAME],
-        );
-        const existingId = trimSafe_(rows[i][SHEET_SCHEMA.ACCOUNT.ID]);
+      const allDocs = firestoreQuery_("accounts");
+      for (let i = 0; i < allDocs.length; i++) {
+        const existingUsername = trimSafe_(allDocs[i].username);
+        const existingId = trimSafe_(allDocs[i].id);
 
         if (
           existingUsername === data.username &&
           existingId !== accountId &&
-          trimSafe_(rows[i][SHEET_SCHEMA.ACCOUNT.ROLE]) !== "DELETED"
+          trimSafe_(allDocs[i].role) !== "DELETED"
         ) {
           throw new Error("USERNAME_ALREADY_EXISTS");
         }
       }
-      values[SHEET_SCHEMA.ACCOUNT.USERNAME] = trimSafe_(data.username);
+      updates.username = trimSafe_(data.username);
     }
 
-    batchWriteRows_(SHEET_NAME.ACCOUNT, row.rowIndex, 1, [values]);
+    updates.updatedAt = toIsoString_(new Date());
+
+    const updated = firestoreUpdate_("accounts", accountId, updates);
 
     logAction_("UPDATE_ACCOUNT", `ACCOUNT_${accountId}`, "system", {
       changes: data,
     });
 
-    invalidateSheetCache_(SHEET_NAME.ACCOUNT);
-
     const updatedAccount = {
       id: accountId,
-      username: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.USERNAME]),
-      role: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.ROLE]),
+      username: trimSafe_(updated.username),
+      role: trimSafe_(updated.role),
     };
     pushDeltaSafe_("ACCOUNT", "UPDATE", updatedAccount);
     return updatedAccount;
@@ -212,29 +215,29 @@ const deleteAccount = (userRole, accountId) => {
   }
 
   return withPaymentLock_(`account_${accountId}`, () => {
-    const row = findRowById_(SHEET_NAME.ACCOUNT, accountId);
-    if (!row) {
+    const doc = firestoreGet_("accounts", accountId);
+    if (!doc) {
       throw new Error("ACCOUNT_NOT_FOUND");
     }
 
-    const values = row.values;
-    const role = trimSafe_(values[SHEET_SCHEMA.ACCOUNT.ROLE]);
+    const role = trimSafe_(doc.role);
 
     if (role === "DELETED") {
       throw new Error("ACCOUNT_ALREADY_DELETED");
     }
 
-    values[SHEET_SCHEMA.ACCOUNT.ROLE] = "DELETED";
-    batchWriteRows_(SHEET_NAME.ACCOUNT, row.rowIndex, 1, [values]);
-
-    logAction_("DELETE_ACCOUNT", `ACCOUNT_${accountId}`, "system", {
-      username: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.USERNAME]),
+    firestoreUpdate_("accounts", accountId, {
+      role: "DELETED",
+      updatedAt: toIsoString_(new Date()),
     });
 
-    invalidateSheetCache_(SHEET_NAME.ACCOUNT);
+    logAction_("DELETE_ACCOUNT", `ACCOUNT_${accountId}`, "system", {
+      username: trimSafe_(doc.username),
+    });
+
     const deletedAccount = {
       id: accountId,
-      username: trimSafe_(values[SHEET_SCHEMA.ACCOUNT.USERNAME]),
+      username: trimSafe_(doc.username),
     };
     pushDeltaSafe_("ACCOUNT", "DELETE", deletedAccount);
     return deletedAccount;
@@ -251,16 +254,14 @@ const updateLastLogin = (accountId) => {
   }
 
   return withPaymentLock_(`account_login_${accountId}`, () => {
-    const row = findRowById_(SHEET_NAME.ACCOUNT, accountId);
-    if (!row) {
+    const doc = firestoreGet_("accounts", accountId);
+    if (!doc) {
       throw new Error("ACCOUNT_NOT_FOUND");
     }
 
-    const values = row.values;
-    values[SHEET_SCHEMA.ACCOUNT.LAST_LOGIN] = toIsoString_(new Date());
-
-    batchWriteRows_(SHEET_NAME.ACCOUNT, row.rowIndex, 1, [values]);
-    invalidateSheetCache_(SHEET_NAME.ACCOUNT);
+    firestoreUpdate_("accounts", accountId, {
+      lastLogin: toIsoString_(new Date()),
+    });
 
     return accountId;
   });
@@ -275,13 +276,13 @@ const login = (username, password) => {
     throw new Error("MISSING_FIELDS: username and password required");
   }
 
-  const rows = getSheetData_(SHEET_NAME.ACCOUNT);
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const rowUsername = trimSafe_(row[SHEET_SCHEMA.ACCOUNT.USERNAME]);
-    const rowPassword = trimSafe_(row[SHEET_SCHEMA.ACCOUNT.PASSWORD]);
-    const rowRole = trimSafe_(row[SHEET_SCHEMA.ACCOUNT.ROLE]);
-    const rowId = trimSafe_(row[SHEET_SCHEMA.ACCOUNT.ID]);
+  const docs = firestoreQuery_("accounts");
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    const rowUsername = trimSafe_(doc.username);
+    const rowPassword = trimSafe_(doc.password);
+    const rowRole = trimSafe_(doc.role);
+    const rowId = trimSafe_(doc.id);
 
     // Skip deleted accounts
     if (rowRole === "DELETED") continue;

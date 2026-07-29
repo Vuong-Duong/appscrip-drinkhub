@@ -1,32 +1,33 @@
 /* =========================
- * Product.gs
+ * Product.gs - Firestore
  * ========================= */
 
 function getProducts(activeOnly = true) {
-  var rows = getSheetData_(SHEET_NAME.PRODUCT);
-  if (rows.length <= 1) {
+  var docs = firestoreQuery_("products");
+  if (!Array.isArray(docs) || docs.length === 0) {
     return [];
   }
-  return rows
-    .slice(1)
-    .filter(function (row) {
+
+  return docs
+    .filter(function (doc) {
+      if (!doc.id) return false;
       if (!activeOnly) return true;
-      const status = trimSafe_(row[SHEET_SCHEMA.PRODUCT.STATUS]);
+      var status = trimSafe_(doc.status);
       return status !== "INACTIVE" && status !== "DELETED";
     })
-    .map(mapProductRow_);
+    .map(mapProductDoc_);
 }
 
-function mapProductRow_(row) {
+function mapProductDoc_(doc) {
   return {
-    id: trimSafe_(row[SHEET_SCHEMA.PRODUCT.ID]),
-    name: trimSafe_(row[SHEET_SCHEMA.PRODUCT.NAME]),
-    price: toNumberSafe_(row[SHEET_SCHEMA.PRODUCT.SALE_PRICE]),
-    cost: toNumberSafe_(row[SHEET_SCHEMA.PRODUCT.COST_PRICE]),
-    stock: toNumberSafe_(row[SHEET_SCHEMA.PRODUCT.STOCK]),
-    category: trimSafe_(row[SHEET_SCHEMA.PRODUCT.CATEGORY]),
-    status: trimSafe_(row[SHEET_SCHEMA.PRODUCT.STATUS]),
-    image: trimSafe_(row[SHEET_SCHEMA.PRODUCT.IMAGE]),
+    id: trimSafe_(doc.id),
+    name: trimSafe_(doc.name),
+    price: toNumberSafe_(doc.price),
+    cost: toNumberSafe_(doc.cost),
+    stock: toNumberSafe_(doc.stock),
+    category: trimSafe_(doc.category),
+    status: trimSafe_(doc.status),
+    image: trimSafe_(doc.image),
   };
 }
 
@@ -49,19 +50,25 @@ function normalizeProductPayload_(payload) {
 function createProduct(payload) {
   return withStockLock_("product_create", function () {
     const data = normalizeProductPayload_(payload);
-    const row = [
-      generateId_("prod"),
-      data.name,
-      data.category,
-      data.price,
-      data.cost,
-      data.stock,
-      data.status,
-      data.image,
-    ];
+    const productId = generateId_("prod");
+    const now = toIsoString_(new Date());
 
-    appendRowsBatch_(SHEET_NAME.PRODUCT, [row]);
-    const product = mapProductRow_(row);
+    const productData = {
+      id: productId,
+      name: data.name,
+      category: data.category,
+      price: data.price,
+      cost: data.cost,
+      stock: data.stock,
+      status: data.status,
+      image: data.image,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    firestoreSet_("products", productId, productData);
+
+    const product = mapProductDoc_(productData);
     logAction_("CREATE_PRODUCT", product.id, (payload || {}).userRole || "system", product);
     pushDeltaSafe_("PRODUCT", "CREATE", product);
     return product;
@@ -70,22 +77,23 @@ function createProduct(payload) {
 
 function updateProduct(productId, payload) {
   return withStockLock_("product_" + productId, function () {
-    const found = findRowById_(SHEET_NAME.PRODUCT, productId);
-    if (!found) throw new Error("PRODUCT_NOT_FOUND");
+    const existing = firestoreGet_("products", productId);
+    if (!existing) throw new Error("PRODUCT_NOT_FOUND");
 
-    const row = found.values;
     const data = payload || {};
+    const updates = {};
 
-    if (data.name !== undefined) row[SHEET_SCHEMA.PRODUCT.NAME] = trimSafe_(data.name);
-    if (data.category !== undefined) row[SHEET_SCHEMA.PRODUCT.CATEGORY] = trimSafe_(data.category);
-    if (data.price !== undefined) row[SHEET_SCHEMA.PRODUCT.SALE_PRICE] = toNumberSafe_(data.price);
-    if (data.cost !== undefined) row[SHEET_SCHEMA.PRODUCT.COST_PRICE] = toNumberSafe_(data.cost);
-    if (data.stock !== undefined) row[SHEET_SCHEMA.PRODUCT.STOCK] = toNumberSafe_(data.stock);
-    if (data.status !== undefined) row[SHEET_SCHEMA.PRODUCT.STATUS] = trimSafe_(data.status).toUpperCase();
-    if (data.image !== undefined) row[SHEET_SCHEMA.PRODUCT.IMAGE] = trimSafe_(data.image);
+    if (data.name !== undefined) updates.name = trimSafe_(data.name);
+    if (data.category !== undefined) updates.category = trimSafe_(data.category);
+    if (data.price !== undefined) updates.price = toNumberSafe_(data.price);
+    if (data.cost !== undefined) updates.cost = toNumberSafe_(data.cost);
+    if (data.stock !== undefined) updates.stock = toNumberSafe_(data.stock);
+    if (data.status !== undefined) updates.status = trimSafe_(data.status).toUpperCase();
+    if (data.image !== undefined) updates.image = trimSafe_(data.image);
+    updates.updatedAt = toIsoString_(new Date());
 
-    batchWriteRows_(SHEET_NAME.PRODUCT, found.rowIndex, 1, [row]);
-    const product = mapProductRow_(row);
+    const updated = firestoreUpdate_("products", productId, updates);
+    const product = mapProductDoc_(updated);
     logAction_("UPDATE_PRODUCT", product.id, data.userRole || "system", product);
     pushDeltaSafe_("PRODUCT", "UPDATE", product);
     return product;
@@ -157,96 +165,103 @@ function reduceProductStock_(items) {
       return 0;
     }
 
-    var rows = getSheetData_(SHEET_NAME.PRODUCT, false);
-    var updatedRows = rows.slice();
+    var allProducts = getProducts(false);
+    var productMap = {};
+    allProducts.forEach(function (p) {
+      productMap[p.id] = p;
+    });
+
     var reduced = 0;
-    var journalRows = [];
+    var journalWrites = [];
+    var now = toIsoString_(new Date());
 
-    for (var i = 1; i < updatedRows.length; i++) {
-      var row = updatedRows[i];
-      var productId = trimSafe_(row[SHEET_SCHEMA.PRODUCT.ID]);
+    items.forEach(function (item) {
+      var productId = trimSafe_(item.productId);
+      var product = productMap[productId];
+      if (!product) return;
 
-      items.forEach(function (item) {
-        if (trimSafe_(item.productId) === productId) {
-          var currentStock = toNumberSafe_(row[SHEET_SCHEMA.PRODUCT.STOCK]);
-          var reduceQty = toNumberSafe_(item.quantity);
-          var newStock = currentStock - reduceQty;
+      var currentStock = toNumberSafe_(product.stock);
+      var reduceQty = toNumberSafe_(item.quantity);
+      var newStock = currentStock - reduceQty;
 
-          // ✓ Prevent negative stock
-          if (newStock < 0) {
-            const productName = trimSafe_(row[SHEET_SCHEMA.PRODUCT.NAME]);
-            throw new Error(
-              "INSUFFICIENT_STOCK: " +
-                productName +
-                ": available " +
-                currentStock +
-                ", requested " +
-                reduceQty,
-            );
-          }
-
-          row[SHEET_SCHEMA.PRODUCT.STOCK] = newStock;
-
-          // Collect journal row (gom lại ghi 1 lần)
-          journalRows.push([
-            generateId_("inv"),
-            productId,
-            "REDUCE_BY_ORDER",
+      // ✓ Prevent negative stock
+      if (newStock < 0) {
+        throw new Error(
+          "INSUFFICIENT_STOCK: " +
+            product.name +
+            ": available " +
+            currentStock +
+            ", requested " +
             reduceQty,
-            currentStock,
-            newStock,
-            "",
-            toIsoString_(new Date()),
-          ]);
+        );
+      }
 
-          reduced++;
-        }
+      // Update product stock in Firestore
+      firestoreUpdate_("products", productId, {
+        stock: newStock,
+        updatedAt: now,
       });
+
+      // Collect journal entry
+      var journalId = generateId_("inv");
+      journalWrites.push({
+        type: "set",
+        collection: "inventory_journals",
+        id: journalId,
+        data: {
+          id: journalId,
+          productId: productId,
+          type: "REDUCE_BY_ORDER",
+          quantity: reduceQty,
+          prevStock: currentStock,
+          nextStock: newStock,
+          orderId: "",
+          timestamp: now,
+        },
+      });
+
+      reduced++;
+    });
+
+    // ✓ Batch write all journal entries at once
+    if (journalWrites.length > 0) {
+      firestoreBatchWrite_(journalWrites);
     }
 
-    // ✓ Atomic write - only write if no error
-    batchWriteRows_(SHEET_NAME.PRODUCT, 1, updatedRows.length, updatedRows);
-
-    // ✓ Ghi tất cả journal 1 lần duy nhất
-    if (journalRows.length > 0) {
-      appendRowsBatch_(APP_CONFIG.INVENTORY_JOURNAL_SHEET, journalRows);
-    }
-
-    pushDeltaSafe_("PRODUCT", "STOCK_REDUCE", { items, reduced });
+    pushDeltaSafe_("PRODUCT", "STOCK_REDUCE", { items: items, reduced: reduced });
     return reduced;
   });
 }
 
 // Inventory Journal & Adjust
 function createInventoryJournal_(payload) {
-  appendRowsBatch_(APP_CONFIG.INVENTORY_JOURNAL_SHEET, [
-    [
-      generateId_("inv"),
-      payload.productId,
-      payload.type,
-      payload.quantity,
-      payload.beforeStock,
-      payload.afterStock,
-      payload.orderId || "",
-      toIsoString_(new Date()),
-    ],
-  ]);
+  var journalId = generateId_("inv");
+  firestoreSet_("inventory_journals", journalId, {
+    id: journalId,
+    productId: payload.productId,
+    type: payload.type,
+    quantity: payload.quantity,
+    prevStock: payload.beforeStock,
+    nextStock: payload.afterStock,
+    orderId: payload.orderId || "",
+    timestamp: toIsoString_(new Date()),
+  });
 }
 
 function adjustInventory_(payload) {
   return withStockLock_(payload.productId, function () {
-    var found = findRowById_(SHEET_NAME.PRODUCT, payload.productId);
-    if (!found) throw new Error("Product not found");
+    var existing = firestoreGet_("products", payload.productId);
+    if (!existing) throw new Error("Product not found");
 
-    var row = found.values;
-    var beforeStock = toNumberSafe_(row[SHEET_SCHEMA.PRODUCT.STOCK]);
+    var beforeStock = toNumberSafe_(existing.stock);
     var afterStock = beforeStock + toNumberSafe_(payload.delta);
 
     if (afterStock < 0) throw new Error("Negative stock");
 
-    row[SHEET_SCHEMA.PRODUCT.STOCK] = afterStock;
-
-    batchWriteRows_(SHEET_NAME.PRODUCT, found.rowIndex, 1, [row]);
+    firestoreUpdate_("products", payload.productId, {
+      stock: afterStock,
+      updatedAt: toIsoString_(new Date()),
+    });
 
     createInventoryJournal_({
       productId: payload.productId,
@@ -259,8 +274,8 @@ function adjustInventory_(payload) {
 
     pushDeltaSafe_("PRODUCT", "INVENTORY_ADJUST", {
       productId: payload.productId,
-      beforeStock,
-      afterStock,
+      beforeStock: beforeStock,
+      afterStock: afterStock,
       delta: payload.delta,
       type: payload.type,
     });

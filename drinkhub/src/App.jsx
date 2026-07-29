@@ -19,6 +19,9 @@ import FeaturePage from "./pages/FeaturePage";
 import MenuManagementPage from "./pages/MenuManagementPage";
 import DiscountManagementPage from "./pages/DiscountManagementPage";
 import CustomerDisplayPage from "./pages/CustomerDisplayPage";
+import DeviceStatusPage from "./pages/DeviceStatusPage";
+import InventoryPage from "./pages/InventoryPage";
+import ShiftReconciliationPage from "./pages/ShiftReconciliationPage";
 import { authApi } from "./api/Api";
 import {
   clearStoredAuthSession,
@@ -136,11 +139,17 @@ function App() {
           <Route path="/shift" element={<ShiftManagementPage />} />
           <Route path="/shift/:shiftId" element={<ShiftDetailPage />} />
           <Route path="/feature/:featureId" element={<FeaturePage />} />
+          <Route path="/device-status" element={<DeviceStatusPage />} />
           <Route element={<AdminRoute />}>
             <Route path="/admin/menu" element={<MenuManagementPage />} />
             <Route
               path="/admin/discount"
               element={<DiscountManagementPage />}
+            />
+            <Route path="/inventory" element={<InventoryPage />} />
+            <Route
+              path="/shift-reconciliation"
+              element={<ShiftReconciliationPage />}
             />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

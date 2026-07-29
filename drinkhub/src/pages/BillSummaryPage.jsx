@@ -107,7 +107,6 @@ export default function BillSummaryPage() {
     const amount = orderData.grandTotal;
 
     try {
-      // 1. Instantly update AppStore for SPA-like responsiveness
       const currentOrders = appStore.get("orders") || [];
       const existingOrderObj = currentOrders.find((o) => o.id === orderId);
 
@@ -120,6 +119,8 @@ export default function BillSummaryPage() {
         discount: orderData.discount,
         grandTotal: orderData.grandTotal,
         paymentStatus: "PAID",
+        paymentMethod:
+          orderData.paymentMethod === "transfer" ? "transfer" : "cash",
         createdBy: orderData.createdBy,
         createdAt: existingOrderObj?.createdAt || new Date().toISOString(),
       };
@@ -133,7 +134,6 @@ export default function BillSummaryPage() {
         appStore.set("orders", [...currentOrders, closedOrder]);
       }
 
-      // Release table in AppStore
       const currentTables = appStore.get("tables") || [];
       appStore.set(
         "tables",
@@ -144,7 +144,6 @@ export default function BillSummaryPage() {
         ),
       );
 
-      // Auto print payment receipt immediately
       try {
         const receiptData = {
           id: orderId,
@@ -176,84 +175,53 @@ export default function BillSummaryPage() {
         console.error("Auto print failed:", printErr);
       }
 
-      // 2. Trigger async background server requests
-      const syncProcess = async () => {
-        try {
-          let finalOrderId = orderId;
-          let finalAmount = amount;
-          const isLocalTempId = String(orderId).startsWith("ord_local_");
+      let finalOrderId = orderId;
+      let finalAmount = amount;
+      const isLocalTempId = String(orderId).startsWith("ord_local_");
 
-          if (!orderData.existingOrderId || isLocalTempId) {
-            // New order OR local temp order not yet synced to server
-            const serverOrder = await orderApi.createOrder(orderData);
-            finalOrderId = serverOrder.id;
-            // Use server's grandTotal to avoid amount mismatch
-            finalAmount = Number(serverOrder.grandTotal) || amount;
-          } else if (
-            orderData.newCartItems &&
-            orderData.newCartItems.length > 0
-          ) {
-            // Existing server order + new items
-            const result = await orderApi.addItems(
-              orderData.existingOrderId,
-              orderData.newCartItems,
-              orderData.discount,
-            );
-            // Use server's updated grandTotal
-            finalAmount = Number(result.grandTotal) || amount;
-          }
+      if (!orderData.existingOrderId || isLocalTempId) {
+        const serverOrder = await orderApi.createOrder(orderData);
+        finalOrderId = serverOrder.id;
+        finalAmount = Number(serverOrder.grandTotal) || amount;
+      } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
+        const result = await orderApi.addItems(
+          orderData.existingOrderId,
+          orderData.newCartItems,
+          orderData.discount,
+        );
+        orderData.newCartItems = [];
+        finalAmount = Number(result.grandTotal) || amount;
+      }
 
-          // Process payment with retry on timeout
-          const paymentPayload = {
-            provider: orderData.paymentMethod,
-            orderId: finalOrderId,
-            amount: finalAmount,
-            transactionId: `${orderData.paymentMethod}_${finalOrderId}_${Date.now()}`,
-          };
+      const paymentResult = await paymentApi.processPayment({
+        provider: "manual",
+        orderId: finalOrderId,
+        amount: finalAmount,
+        transactionId: `manual_${finalOrderId}_${Date.now()}`,
+      });
 
-          try {
-            await paymentApi.processPayment(paymentPayload);
-          } catch (payErr) {
-            if (payErr?.code === "REQUEST_TIMEOUT") {
-              console.log("Payment timeout, retrying once...");
-              await new Promise((r) => setTimeout(r, 2000));
-              try {
-                await paymentApi.processPayment(paymentPayload);
-              } catch (retryErr) {
-                // ORDER_ALREADY_FROZEN means first attempt succeeded, ignore
-                if (retryErr?.code !== "ORDER_ALREADY_FROZEN") throw retryErr;
-                console.log("Payment already processed (frozen), sync OK");
-              }
-            } else if (payErr?.code === "ORDER_ALREADY_FROZEN") {
-              // Already paid, treat as success
-              console.log("Payment already processed (frozen), sync OK");
-            } else {
-              throw payErr;
-            }
-          }
-
-          console.log(
-            `Background payment sync succeeded for order: ${finalOrderId}`,
-          );
-        } catch (err) {
-          console.error("Failed to sync payment in background:", err);
-          // Don't show error for timeout or already-frozen
-          if (err?.code !== "REQUEST_TIMEOUT" && err?.code !== "ORDER_ALREADY_FROZEN") {
-            appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
-          }
-        }
-      };
-
-      // Run sync in background (fire-and-forget)
-      syncProcess();
-
-      // Show success screen on customer display
+      CustomerDisplayService.sendCheckout({
+        tableName: orderData.tableName,
+        items: orderData.items.map((i) => ({
+          name: i.productName || i.name,
+          quantity: i.quantity,
+          price: i.unitPrice || i.price,
+          total: i.subtotal,
+        })),
+        subtotal: orderData.subtotal,
+        discount: orderData.discount,
+        total: orderData.grandTotal,
+        paymentMethod:
+          orderData.paymentMethod === "transfer" ? "transfer" : "cash",
+        qrUrl: paymentResult?.qrUrl || paymentResult?.quickLink || "",
+        orderId: finalOrderId,
+        settings: storeInfo,
+      });
       CustomerDisplayService.sendSuccess();
-
-      // 3. Redirect to KhuVucPage immediately
       navigate("/khu-vuc", { replace: true });
     } catch (err) {
-      setError(err.message || "Lỗi khi thanh toán");
+      console.error("Failed to confirm payment:", err);
+      setError(err.message || "Lỗi khi xác nhận thanh toán");
       setIsProcessing(false);
     }
   };
@@ -358,17 +326,15 @@ export default function BillSummaryPage() {
           <div className="bg-white rounded-3xl p-6 shadow-sm flex flex-col h-fit sticky top-20">
             {/* Payment Method */}
             <div className="mb-6 pb-6 border-b">
-              <p className="text-sm text-gray-500 mb-2">
-                Phương thức thanh toán
-              </p>
+              <p className="text-sm text-gray-500 mb-2">Cách thanh toán</p>
               <div className="flex items-center gap-2">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-lg font-bold">
-                  💳
+                  {orderData.paymentMethod === "transfer" ? "📱" : "💵"}
                 </div>
                 <p className="font-bold">
-                  {orderData.paymentMethod === "cash"
-                    ? "Tiền mặt"
-                    : "Chuyển khoản"}
+                  {orderData.paymentMethod === "transfer"
+                    ? "Chuyển khoản qua VietQR"
+                    : "Tiền mặt"}
                 </p>
               </div>
             </div>
@@ -390,7 +356,7 @@ export default function BillSummaryPage() {
                 disabled={isProcessing}
                 className="w-full py-4 rounded-2xl font-bold text-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md"
               >
-                {isProcessing ? "Đang xử lý..." : "💰 Thanh toán & Hoàn tất"}
+                {isProcessing ? "Đang xử lý..." : "✅ Đã thanh toán"}
               </button>
 
               {createdOrder && (
@@ -422,14 +388,11 @@ export default function BillSummaryPage() {
               </div>
             )}
 
-            {/* Cash Register Note */}
-            {orderData.paymentMethod === "cash" && (
-              <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
-                <p className="text-xs text-amber-700 font-medium">
-                  💼 Ghi nhận tiền mặt vào két khi thanh toán
-                </p>
-              </div>
-            )}
+            <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
+              <p className="text-xs text-amber-700 font-medium">
+                💼 Nhân viên xác nhận sau khi khách đã chuyển khoản thành công
+              </p>
+            </div>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 /* =========================
- * Table.gs - Quản lý Bàn & Nhân viên
+ * Table.gs - Quản lý Bàn & Nhân viên - Firestore
  * ========================= */
 
 /**
@@ -10,24 +10,23 @@
 const releaseTable = (tableId, orderId = null) => {
   // ✓ Use lock to prevent concurrent updates
   return withStockLock_(`table_${tableId}`, () => {
-    const tableRow = findRowById_(SHEET_NAME.TABLE, tableId);
-    if (!tableRow) {
+    const doc = firestoreGet_("tables", tableId);
+    if (!doc) {
       throw new Error("TABLE_NOT_FOUND");
     }
 
-    const row = tableRow.values;
-    const currentOrderId = trimSafe_(row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID]);
-    const status = trimSafe_(row[SHEET_SCHEMA.TABLE.STATUS]);
+    const currentOrderId = trimSafe_(doc.currentOrderId);
+    const status = trimSafe_(doc.status);
 
     // ✓ Check if already available
-    if (status === "AVAILABLE") {
+    if (status === "AVAILABLE" || status === "available") {
       logAction_("RELEASE_TABLE_ALREADY_AVAILABLE", tableId, "system", {
-        table: row[SHEET_SCHEMA.TABLE.NAME],
+        table: trimSafe_(doc.name),
       });
       // Already released, return table info
       const availableTable = {
         id: tableId,
-        name: trimSafe_(row[SHEET_SCHEMA.TABLE.NAME]),
+        name: trimSafe_(doc.name),
         status: "AVAILABLE",
       };
       pushDeltaSafe_("TABLE", "RELEASE", availableTable);
@@ -39,19 +38,20 @@ const releaseTable = (tableId, orderId = null) => {
       throw new Error("ORDER_MISMATCH");
     }
 
-    row[SHEET_SCHEMA.TABLE.STATUS] = "AVAILABLE"; // Trả bàn
-    row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID] = ""; // Xóa order hiện tại
-
-    batchWriteRows_(SHEET_NAME.TABLE, tableRow.rowIndex, 1, [row]);
+    firestoreUpdate_("tables", tableId, {
+      status: "AVAILABLE",
+      currentOrderId: "",
+      updatedAt: toIsoString_(new Date()),
+    });
 
     logAction_("RELEASE_TABLE", tableId, "system", {
-      table: row[SHEET_SCHEMA.TABLE.NAME],
+      table: trimSafe_(doc.name),
       previousOrderId: currentOrderId,
     });
 
     const releasedTable = {
       id: tableId,
-      name: trimSafe_(row[SHEET_SCHEMA.TABLE.NAME]),
+      name: trimSafe_(doc.name),
       status: "AVAILABLE",
     };
     pushDeltaSafe_("TABLE", "RELEASE", releasedTable);
@@ -68,39 +68,39 @@ const releaseTable = (tableId, orderId = null) => {
 const occupyTable = (tableId, orderId) => {
   // ✓ Use lock to prevent concurrent updates
   return withStockLock_(`table_${tableId}`, () => {
-    const tableRow = findRowById_(SHEET_NAME.TABLE, tableId);
-    if (!tableRow) {
+    const doc = firestoreGet_("tables", tableId);
+    if (!doc) {
       throw new Error("TABLE_NOT_FOUND");
     }
 
-    const row = tableRow.values;
-    const status = trimSafe_(row[SHEET_SCHEMA.TABLE.STATUS]);
-    const currentOrderId = trimSafe_(row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID]);
+    const status = trimSafe_(doc.status);
+    const currentOrderId = trimSafe_(doc.currentOrderId);
 
     // Nếu bàn đã occupied cùng orderId → không cần ghi lại (idempotent)
-    if (status === "OCCUPIED" && currentOrderId === orderId) {
+    if ((status === "OCCUPIED" || status === "occupied") && currentOrderId === orderId) {
       return {
         id: tableId,
-        name: trimSafe_(row[SHEET_SCHEMA.TABLE.NAME]),
+        name: trimSafe_(doc.name),
         status: "OCCUPIED",
         currentOrderId: orderId,
       };
     }
 
-    row[SHEET_SCHEMA.TABLE.STATUS] = "OCCUPIED";
-    row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID] = orderId;
-
-    batchWriteRows_(SHEET_NAME.TABLE, tableRow.rowIndex, 1, [row]);
+    firestoreUpdate_("tables", tableId, {
+      status: "OCCUPIED",
+      currentOrderId: orderId,
+      updatedAt: toIsoString_(new Date()),
+    });
 
     logAction_("OCCUPY_TABLE", tableId, "system", {
       orderId: orderId,
-      table: row[SHEET_SCHEMA.TABLE.NAME],
+      table: trimSafe_(doc.name),
       previousOrderId: currentOrderId || null,
     });
 
     const occupiedTable = {
       id: tableId,
-      name: trimSafe_(row[SHEET_SCHEMA.TABLE.NAME]),
+      name: trimSafe_(doc.name),
       status: "OCCUPIED",
       currentOrderId: orderId,
     };
@@ -114,20 +114,21 @@ const occupyTable = (tableId, orderId) => {
  * ✓ Consolidated getAvailableTables và getAllTables
  */
 const getAllTables = (filterStatus = null) => {
-  const rows = getSheetData_(SHEET_NAME.TABLE);
+  const docs = firestoreQuery_("tables");
   const tables = [];
 
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const status = trimSafe_(row[SHEET_SCHEMA.TABLE.STATUS]);
-    const currentOrderId = trimSafe_(row[SHEET_SCHEMA.TABLE.CURRENT_ORDER_ID]);
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    if (!doc.id) continue;
+    const status = trimSafe_(doc.status);
+    const currentOrderId = trimSafe_(doc.currentOrderId);
 
     // Apply filter if specified
-    if (filterStatus && status !== filterStatus) continue;
+    if (filterStatus && status !== filterStatus && status.toUpperCase() !== filterStatus.toUpperCase()) continue;
 
     tables.push({
-      id: trimSafe_(row[SHEET_SCHEMA.TABLE.ID]),
-      name: trimSafe_(row[SHEET_SCHEMA.TABLE.NAME]),
+      id: trimSafe_(doc.id),
+      name: trimSafe_(doc.name),
       status: status,
       currentOrderId: currentOrderId,
     });
@@ -141,4 +142,32 @@ const getAllTables = (filterStatus = null) => {
  */
 const getAvailableTables = () => {
   return getAllTables("AVAILABLE");
+};
+
+/**
+ * Tạo bàn mới
+ * @param {Object} payload - { name: string, createdBy?: string }
+ */
+const createTable = (payload) => {
+  const name = trimSafe_(payload.name || "");
+  if (!name) throw new Error("MISSING_FIELDS: name");
+
+  const tableId = generateId_("tbl");
+  const now = toIsoString_(new Date());
+
+  const newTableData = {
+    id: tableId,
+    name: name,
+    status: "AVAILABLE",
+    currentOrderId: "",
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  firestoreSet_("tables", tableId, newTableData);
+
+  const newTable = { id: tableId, name, status: "AVAILABLE", currentOrderId: "" };
+  logAction_("CREATE_TABLE", tableId, payload.createdBy || "staff", { name });
+  pushDeltaSafe_("TABLE", "CREATE", newTable);
+  return newTable;
 };

@@ -1,5 +1,5 @@
 /* =========================
- * Order.gs - Order + Immutable Snapshot
+ * Order.gs - Order + Immutable Snapshot - Firestore
  * ========================= */
 
 const createOrder = (payload) => {
@@ -19,51 +19,24 @@ const createOrder = (payload) => {
       discount: payload.discount || 0,
       grandTotal: payload.grandTotal,
       paymentStatus: "PENDING",
+      paymentMethod: payload.paymentMethod === "transfer" ? "transfer" : "cash",
       createdBy: payload.createdBy || "staff",
       createdAt: toIsoString_(new Date()),
+      updatedAt: toIsoString_(new Date()),
       version: APP_CONFIG.SNAPSHOT_VERSION,
     };
 
-    // 1. Lưu Order chính
-    appendRowsBatch_(SHEET_NAME.ORDER, [
-      [
-        orderData.id,
-        orderData.tableId,
-        orderData.customerName,
-        orderData.status,
-        orderData.subtotal,
-        orderData.discount,
-        orderData.grandTotal,
-        orderData.paymentStatus,
-        orderData.createdBy,
-        orderData.createdAt,
-      ],
-    ]);
+    // 1. Lưu Order chính vào collection 'orders'
+    firestoreSet_("orders", orderId, orderData);
 
-    // 2. Lưu ORDER_DETAIL cho từng sản phẩm
-    const orderDetails = orderData.items.map((item) => [
-      generateId_("detail"),
-      orderData.id,
-      item.productId,
-      item.productName || "",
-      item.quantity,
-      item.unitPrice || 0,
-      item.subtotal || 0,
-    ]);
-
-    if (orderDetails.length > 0) {
-      appendRowsBatch_(SHEET_NAME.ORDER_DETAIL, orderDetails);
-    }
-
-    // 3. Lưu Snapshot (Immutable)
-    appendRowsBatch_(SHEET_NAME.ORDER_SNAPSHOT, [
-      [
-        orderData.id,
-        JSON.stringify(orderData),
-        orderData.version,
-        orderData.createdAt,
-      ],
-    ]);
+    // 2. Lưu Snapshot (Immutable) vào collection 'order_snapshots'
+    firestoreSet_("order_snapshots", orderId, {
+      orderId: orderData.id,
+      snapshotData: JSON.stringify(orderData),
+      version: orderData.version,
+      createdAt: orderData.createdAt,
+      frozen: false,
+    });
 
     // === REDUCE STOCK SAU KHI ORDER CREATED ===
     reduceProductStock_(payload.items || []);
@@ -86,39 +59,35 @@ const createOrder = (payload) => {
 // Freeze khi thanh toán thành công
 // Refactored to throw errors, return raw snapshot
 const freezeOrderSnapshot = (orderId, paymentInfo) => {
-  // ✓ Use findRowById_ instead of manual loop
-  const snapshotRow = findRowById_(SHEET_NAME.ORDER_SNAPSHOT, orderId);
-  if (!snapshotRow) {
+  const snapshotDoc = firestoreGet_("order_snapshots", orderId);
+  if (!snapshotDoc) {
     throw new Error("ORDER_NOT_FOUND");
   }
 
-  let snapshot = parseJsonSafe_(
-    snapshotRow.values[SHEET_SCHEMA.ORDER_SNAPSHOT.SNAPSHOT_DATA],
-  );
+  let snapshot = parseJsonSafe_(snapshotDoc.snapshotData);
   if (!snapshot) {
     throw new Error("INVALID_SNAPSHOT");
   }
 
   // ✓ Check if already frozen
-  if (snapshot.frozen === true) {
+  if (snapshot.frozen === true || snapshotDoc.frozen === true) {
     throw new Error("ORDER_ALREADY_FROZEN");
   }
 
+  const nowStr = toIsoString_(new Date());
   snapshot.paymentStatus = "PAID";
   snapshot.paymentInfo = paymentInfo;
-  snapshot.frozenAt = toIsoString_(new Date());
+  snapshot.frozenAt = nowStr;
   snapshot.frozen = true;
 
-  // Update snapshot row
-  const sheet = getSheet_(SHEET_NAME.ORDER_SNAPSHOT);
-  sheet
-    .getRange(
-      snapshotRow.rowIndex,
-      SHEET_SCHEMA.ORDER_SNAPSHOT.SNAPSHOT_DATA + 1,
-    )
-    .setValue(JSON.stringify(snapshot));
+  // Update snapshot doc in Firestore
+  firestoreUpdate_("order_snapshots", orderId, {
+    snapshotData: JSON.stringify(snapshot),
+    frozen: true,
+    frozenAt: nowStr,
+  });
 
-  // Update main order
+  // Update main order in Firestore
   updateOrderStatus(orderId, "CLOSED", "PAID");
 
   // Release bàn nếu có
@@ -126,78 +95,68 @@ const freezeOrderSnapshot = (orderId, paymentInfo) => {
     releaseTable(snapshot.tableId, orderId);
   }
 
-  // ✓ Invalidate cache once (from batchWriteRows_)
-  invalidateSheetCache_(SHEET_NAME.ORDER_SNAPSHOT);
-
   logAction_("FREEZE_ORDER", orderId, "system", paymentInfo);
   pushDeltaSafe_("ORDER", "FREEZE", snapshot);
   return snapshot;
 };
 
 const updateOrderStatus = (orderId, status, paymentStatus = null) => {
-  const orderRow = findRowById_(SHEET_NAME.ORDER, orderId);
-  if (!orderRow) {
+  const orderDoc = firestoreGet_("orders", orderId);
+  if (!orderDoc) {
     return false;
   }
 
-  const row = orderRow.values;
-  row[SHEET_SCHEMA.ORDER.STATUS] = status;
+  const updates = {
+    status: status,
+    updatedAt: toIsoString_(new Date()),
+  };
+
   if (paymentStatus) {
-    row[SHEET_SCHEMA.ORDER.PAYMENT_STATUS] = paymentStatus;
+    updates.paymentStatus = paymentStatus;
   }
 
-  batchWriteRows_(SHEET_NAME.ORDER, orderRow.rowIndex, 1, [row]);
-  invalidateSheetCache_(SHEET_NAME.ORDER);
+  firestoreUpdate_("orders", orderId, updates);
+
   pushDeltaSafe_("ORDER", "STATUS_UPDATE", {
     orderId,
     status,
-    paymentStatus:
-      paymentStatus || trimSafe_(row[SHEET_SCHEMA.ORDER.PAYMENT_STATUS]),
+    paymentStatus: paymentStatus || trimSafe_(orderDoc.paymentStatus),
   });
   return true;
 };
 
-const mapOrderRow_ = (row) => ({
-  id: trimSafe_(row[SHEET_SCHEMA.ORDER.ID]),
-  tableId: trimSafe_(row[SHEET_SCHEMA.ORDER.TABLE_ID]),
-  customerName: trimSafe_(row[SHEET_SCHEMA.ORDER.CUSTOMER_NAME]),
-  status: trimSafe_(row[SHEET_SCHEMA.ORDER.STATUS]),
-  subtotal: toNumberSafe_(row[SHEET_SCHEMA.ORDER.SUBTOTAL]),
-  discount: toNumberSafe_(row[SHEET_SCHEMA.ORDER.DISCOUNT]),
-  grandTotal: toNumberSafe_(row[SHEET_SCHEMA.ORDER.GRAND_TOTAL]),
-  paymentStatus: trimSafe_(row[SHEET_SCHEMA.ORDER.PAYMENT_STATUS]),
-  createdBy: trimSafe_(row[SHEET_SCHEMA.ORDER.CREATED_BY]),
-  createdAt: trimSafe_(row[SHEET_SCHEMA.ORDER.CREATED_AT]),
-});
-
-const mapOrderDetailRow_ = (row) => ({
-  id: trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.ID]),
-  orderId: trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.ORDER_ID]),
-  productId: trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.PRODUCT_ID]),
-  productName: trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.PRODUCT_NAME]),
-  quantity: toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.QUANTITY]),
-  unitPrice: toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.UNIT_PRICE]),
-  subtotal: toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.SUBTOTAL]),
+const mapOrderDoc_ = (doc) => ({
+  id: trimSafe_(doc.id),
+  tableId: trimSafe_(doc.tableId),
+  customerName: trimSafe_(doc.customerName),
+  status: trimSafe_(doc.status),
+  subtotal: toNumberSafe_(doc.subtotal),
+  discount: toNumberSafe_(doc.discount),
+  grandTotal: toNumberSafe_(doc.grandTotal),
+  paymentStatus: trimSafe_(doc.paymentStatus),
+  createdBy: trimSafe_(doc.createdBy),
+  createdAt: trimSafe_(doc.createdAt),
+  paymentMethod: trimSafe_(doc.paymentMethod) || "cash",
+  items: Array.isArray(doc.items) ? doc.items : [],
 });
 
 /**
  * Thêm món vào order đang mở (PAY_LATER flow)
  * - Validate order OPEN + PENDING
- * - Append items mới vào ORDER_DETAIL
- * - Cập nhật subtotal, grandTotal trên ORDER row
+ * - Append items mới vào order.items
+ * - Cập nhật subtotal, grandTotal trên ORDER doc
  * - Cập nhật snapshot
  * - Giảm stock
  */
 const addItemsToOrder = (orderId, newItems, discount) => {
   return withTransaction_("reduce_stock", () => {
-    const orderRow = findRowById_(SHEET_NAME.ORDER, orderId);
-    if (!orderRow) {
+    const orderDoc = firestoreGet_("orders", orderId);
+    if (!orderDoc) {
       throw new Error("ORDER_NOT_FOUND");
     }
 
-    const row = orderRow.values;
-    const status = trimSafe_(row[SHEET_SCHEMA.ORDER.STATUS]);
-    const paymentStatus = trimSafe_(row[SHEET_SCHEMA.ORDER.PAYMENT_STATUS]);
+    const status = trimSafe_(orderDoc.status);
+    const paymentStatus = trimSafe_(orderDoc.paymentStatus);
 
     if (status !== "OPEN") {
       throw new Error("ORDER_NOT_OPEN");
@@ -209,63 +168,43 @@ const addItemsToOrder = (orderId, newItems, discount) => {
     // Validate stock
     validateStockBeforeOrder_(newItems);
 
-    // Append new items to ORDER_DETAIL
-    const orderDetails = newItems.map((item) => [
-      generateId_("detail"),
-      orderId,
-      item.productId,
-      item.productName || "",
-      item.quantity,
-      item.unitPrice || 0,
-      item.subtotal || 0,
-    ]);
+    const existingItems = Array.isArray(orderDoc.items) ? orderDoc.items : [];
+    const updatedItems = [...existingItems, ...newItems];
 
-    if (orderDetails.length > 0) {
-      appendRowsBatch_(SHEET_NAME.ORDER_DETAIL, orderDetails);
-    }
-
-    // Recalculate totals from ALL items in ORDER_DETAIL
-    const allDetailRows = getSheetData_(SHEET_NAME.ORDER_DETAIL, false);
+    // Recalculate totals from ALL items
     let newSubtotal = 0;
-    for (let i = 1; i < allDetailRows.length; i++) {
-      const detailOrderId = trimSafe_(allDetailRows[i][SHEET_SCHEMA.ORDER_DETAIL.ORDER_ID]);
-      if (detailOrderId === orderId) {
-        newSubtotal += toNumberSafe_(allDetailRows[i][SHEET_SCHEMA.ORDER_DETAIL.SUBTOTAL]);
-      }
-    }
+    updatedItems.forEach((item) => {
+      newSubtotal += toNumberSafe_(item.subtotal || item.unitPrice * item.quantity);
+    });
 
-    const safeDiscount = discount !== undefined && discount !== null
-      ? toNumberSafe_(discount)
-      : toNumberSafe_(row[SHEET_SCHEMA.ORDER.DISCOUNT]);
+    const safeDiscount =
+      discount !== undefined && discount !== null
+        ? toNumberSafe_(discount)
+        : toNumberSafe_(orderDoc.discount);
     const newGrandTotal = newSubtotal - safeDiscount;
 
-    // Update ORDER row
-    row[SHEET_SCHEMA.ORDER.SUBTOTAL] = newSubtotal;
-    row[SHEET_SCHEMA.ORDER.DISCOUNT] = safeDiscount;
-    row[SHEET_SCHEMA.ORDER.GRAND_TOTAL] = newGrandTotal;
-    batchWriteRows_(SHEET_NAME.ORDER, orderRow.rowIndex, 1, [row]);
-    invalidateSheetCache_(SHEET_NAME.ORDER);
+    // Update ORDER doc
+    firestoreUpdate_("orders", orderId, {
+      items: updatedItems,
+      subtotal: newSubtotal,
+      discount: safeDiscount,
+      grandTotal: newGrandTotal,
+      updatedAt: toIsoString_(new Date()),
+    });
 
     // Update snapshot
-    const snapshotRow = findRowById_(SHEET_NAME.ORDER_SNAPSHOT, orderId);
-    if (snapshotRow) {
-      let snapshot = parseJsonSafe_(
-        snapshotRow.values[SHEET_SCHEMA.ORDER_SNAPSHOT.SNAPSHOT_DATA],
-      );
+    const snapshotDoc = firestoreGet_("order_snapshots", orderId);
+    if (snapshotDoc) {
+      let snapshot = parseJsonSafe_(snapshotDoc.snapshotData);
       if (snapshot) {
-        snapshot.items = [...(snapshot.items || []), ...newItems];
+        snapshot.items = updatedItems;
         snapshot.subtotal = newSubtotal;
         snapshot.discount = safeDiscount;
         snapshot.grandTotal = newGrandTotal;
 
-        const sheet = getSheet_(SHEET_NAME.ORDER_SNAPSHOT);
-        sheet
-          .getRange(
-            snapshotRow.rowIndex,
-            SHEET_SCHEMA.ORDER_SNAPSHOT.SNAPSHOT_DATA + 1,
-          )
-          .setValue(JSON.stringify(snapshot));
-        invalidateSheetCache_(SHEET_NAME.ORDER_SNAPSHOT);
+        firestoreUpdate_("order_snapshots", orderId, {
+          snapshotData: JSON.stringify(snapshot),
+        });
       }
     }
 
@@ -277,15 +216,22 @@ const addItemsToOrder = (orderId, newItems, discount) => {
       newSubtotal,
       newGrandTotal,
     });
-    pushDeltaSafe_("ORDER", "ADD_ITEMS", { orderId, newSubtotal, newGrandTotal });
-
-    return {
+    pushDeltaSafe_("ORDER", "ADD_ITEMS", {
       orderId,
+      newSubtotal,
+      newGrandTotal,
+    });
+
+    const updatedOrder = {
+      ...mapOrderDoc_(orderDoc),
+      items: updatedItems,
       subtotal: newSubtotal,
       discount: safeDiscount,
       grandTotal: newGrandTotal,
-      addedItems: newItems,
+      updatedAt: toIsoString_(new Date()),
     };
+
+    return updatedOrder;
   });
 };
 
@@ -294,36 +240,19 @@ const addItemsToOrder = (orderId, newItems, discount) => {
  * Dùng khi click bàn OCCUPIED để xem order hiện tại
  */
 const getOrderByTicketId = (ticketId) => {
-  const orderRows = getSheetData_(SHEET_NAME.ORDER);
-  const detailRows = getSheetData_(SHEET_NAME.ORDER_DETAIL);
+  const docs = firestoreQuery_("orders", {
+    filters: [
+      { field: "tableId", op: "EQUAL", value: ticketId },
+      { field: "status", op: "EQUAL", value: "OPEN" },
+    ],
+    limit: 1,
+  });
 
-  // Find OPEN order with this tableId
-  let foundOrder = null;
-  for (let i = 1; i < orderRows.length; i++) {
-    const order = mapOrderRow_(orderRows[i]);
-    if (order.tableId === ticketId && order.status === "OPEN") {
-      foundOrder = order;
-      break;
-    }
-  }
-
-  if (!foundOrder) {
+  if (!Array.isArray(docs) || docs.length === 0) {
     return null;
   }
 
-  // Get items for this order
-  const items = [];
-  for (let i = 1; i < detailRows.length; i++) {
-    const detail = mapOrderDetailRow_(detailRows[i]);
-    if (detail.orderId === foundOrder.id) {
-      items.push(detail);
-    }
-  }
-
-  return {
-    ...foundOrder,
-    items,
-  };
+  return mapOrderDoc_(docs[0]);
 };
 
 const getOrders = (filters = {}) => {
@@ -332,35 +261,75 @@ const getOrders = (filters = {}) => {
   const status = trimSafe_(filters.status);
   const paymentStatus = trimSafe_(filters.paymentStatus);
 
-  const detailRows = getSheetData_(SHEET_NAME.ORDER_DETAIL);
-  const detailsByOrderId = {};
+  const firestoreFilters = [];
+  if (tableId) firestoreFilters.push({ field: "tableId", op: "EQUAL", value: tableId });
+  if (status) firestoreFilters.push({ field: "status", op: "EQUAL", value: status });
+  if (paymentStatus) firestoreFilters.push({ field: "paymentStatus", op: "EQUAL", value: paymentStatus });
 
-  for (let i = 1; i < detailRows.length; i++) {
-    const detail = mapOrderDetailRow_(detailRows[i]);
-    if (!detail.orderId) continue;
-    if (!detailsByOrderId[detail.orderId]) {
-      detailsByOrderId[detail.orderId] = [];
-    }
-    detailsByOrderId[detail.orderId].push(detail);
-  }
+  const docs = firestoreQuery_("orders", {
+    filters: firestoreFilters,
+    limit: limit,
+  });
 
-  const orderRows = getSheetData_(SHEET_NAME.ORDER);
-  const orders = [];
-
-  for (let i = 1; i < orderRows.length; i++) {
-    const order = mapOrderRow_(orderRows[i]);
-    if (!order.id) continue;
-    if (tableId && order.tableId !== tableId) continue;
-    if (status && order.status !== status) continue;
-    if (paymentStatus && order.paymentStatus !== paymentStatus) continue;
-
-    orders.push({
-      ...order,
-      items: detailsByOrderId[order.id] || [],
-    });
-  }
+  const orders = (Array.isArray(docs) ? docs : []).map(mapOrderDoc_);
 
   return orders
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
     .slice(0, limit);
 };
+
+/**
+ * XÓA ORDER - CHỈ OWNER / ADMIN MỚI ĐƯỢC PHÉP THỰC HIỆN
+ * @param {string} orderId
+ * @param {string} userRole
+ */
+const deleteOrder = (orderId, userRole) => {
+  if (!userRole || userRole.toLowerCase() !== "admin") {
+    throw new Error("PERMISSION_DENIED: Chỉ Chủ quán / Admin mới có quyền xóa đơn hàng");
+  }
+
+  if (!orderId) throw new Error("ORDER_ID_REQUIRED");
+
+  const existing = firestoreGet_("orders", orderId);
+  if (!existing) {
+    return { success: true, deletedId: orderId, note: "ORDER_NOT_FOUND" };
+  }
+
+  // 1. Delete main order document from 'orders' collection
+  firestoreDelete_("orders", orderId);
+
+  // 2. Delete snapshot document if exists
+  try {
+    firestoreDelete_("order_snapshots", orderId);
+  } catch (e) {
+    // ignore if missing
+  }
+
+  // 3. Delete payment record if exists
+  try {
+    firestoreDelete_("payments", orderId);
+  } catch (e) {
+    // ignore if missing
+  }
+
+  // 4. Release table if assigned
+  if (existing.tableId) {
+    try {
+      releaseTable(existing.tableId, orderId);
+    } catch (e) {
+      // ignore table release error
+    }
+  }
+
+  logAction_("DELETE_ORDER", orderId, "admin", {
+    deletedOrder: existing,
+  });
+
+  pushDeltaSafe_("ORDER", "DELETE", { orderId });
+
+  return { success: true, deletedId: orderId };
+};
+

@@ -46,7 +46,9 @@ const normalizeOrderPayloadForApi_ = (payload = {}) => {
 
 const normalizePaymentPayloadForApi_ = (payload = {}) => {
   const data = payload.data || payload;
-  const provider = trimSafe_(payload.provider || data.provider).toLowerCase();
+  const provider =
+    trimSafe_(payload.provider || data.provider || "manual").toLowerCase() ||
+    "manual";
   return {
     provider,
     data: {
@@ -311,11 +313,13 @@ const handleGetReport_ = withTryCatch_((payload) => {
 const handleAddItems_ = withTryCatch_((payload) => {
   const missing = requireFields_(payload, ["orderId", "items"]);
   if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
-  return ok_(addItemsToOrder(
-    trimSafe_(payload.orderId),
-    normalizeOrderPayloadForApi_({ items: payload.items }).items,
-    payload.discount,
-  ));
+  return ok_(
+    addItemsToOrder(
+      trimSafe_(payload.orderId),
+      normalizeOrderPayloadForApi_({ items: payload.items }).items,
+      payload.discount,
+    ),
+  );
 });
 
 const handleGetOrderByTicket_ = withTryCatch_((payload) => {
@@ -325,17 +329,16 @@ const handleGetOrderByTicket_ = withTryCatch_((payload) => {
 });
 
 const handlePaymentAndroid_ = withTryCatch_((payload) => {
-  const missing = requireFields_(payload, ["message"]);
-  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_({
+    success: false,
+    message: "Manual payment confirmation only. Use PAYMENT action.",
+  });
+});
 
-  return ok_(
-    processPaymentFromNotification({
-      provider: payload.provider || "",
-      title: payload.title || "Payment Notification",
-      message: payload.message,
-      timestamp: payload.timestamp || toIsoString_(new Date()),
-    }),
-  );
+const handleCreateTable_ = withTryCatch_((payload) => {
+  const missing = requireFields_(payload, ["name"]);
+  if (missing) throw new Error("MISSING_FIELDS: " + missing.join(", "));
+  return ok_(createTable(payload));
 });
 
 const handleUploadImage_ = withTryCatch_((payload) => {
@@ -352,11 +355,47 @@ const handleBatchCRUDWithSync_ = withTryCatch_((payload) => {
   return ok_(batchCRUDWithSync(payload));
 });
 
+const handleGetIngredients_ = withTryCatch_(() => {
+  return ok_(getIngredients());
+});
+
+const handleCreateIngredient_ = withTryCatch_((payload) => {
+  return ok_(createIngredient(payload));
+});
+
+const handleAddInventory_ = withTryCatch_((payload) => {
+  return ok_(addInventory(payload));
+});
+
+const handleStocktakeInventory_ = withTryCatch_((payload) => {
+  return ok_(stocktakeInventory(payload));
+});
+
+const handleGetInventoryHistory_ = withTryCatch_((payload) => {
+  return ok_(getInventoryHistory(payload));
+});
+
+const handleAddCashAdjustment_ = withTryCatch_((payload, context) => {
+  const userRole = context?.user?.role || payload?.userRole;
+  return ok_(addCashAdjustment(userRole, payload));
+});
+
+const handleGetShiftReconciliation_ = withTryCatch_((payload, context) => {
+  const userRole = context?.user?.role || payload?.userRole;
+  return ok_(getShiftReconciliation(userRole, payload));
+});
+
+const handleDeleteOrder_ = withTryCatch_((payload, context) => {
+  const userRole = context?.user?.role || payload?.userRole;
+  return ok_(deleteOrder(payload?.orderId, userRole));
+});
+
 // =========================
 // ACTION HANDLERS REGISTRY
 // =========================
 const ACTION_HANDLERS = Object.freeze({
   CREATE_ORDER: handleCreateOrder_,
+  DELETE_ORDER: handleDeleteOrder_,
   PAYMENT: handlePayment_,
   PAYMENT_ANDROID: handlePaymentAndroid_,
   GET_DELTA: handleGetDelta_,
@@ -389,6 +428,14 @@ const ACTION_HANDLERS = Object.freeze({
   UPLOAD_IMAGE: handleUploadImage_,
   GET_ALL_DATA_FOR_CACHE: handleGetAllDataForCache_,
   BATCH_CRUD_WITH_SYNC: handleBatchCRUDWithSync_,
+  CREATE_TABLE: handleCreateTable_,
+  GET_INGREDIENTS: handleGetIngredients_,
+  CREATE_INGREDIENT: handleCreateIngredient_,
+  ADD_INVENTORY: handleAddInventory_,
+  STOCKTAKE_INVENTORY: handleStocktakeInventory_,
+  GET_INVENTORY_HISTORY: handleGetInventoryHistory_,
+  ADD_CASH_ADJUSTMENT: handleAddCashAdjustment_,
+  GET_SHIFT_RECONCILIATION: handleGetShiftReconciliation_,
 });
 
 // =========================

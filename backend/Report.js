@@ -1,5 +1,5 @@
 /* =========================
- * Report.js - Report generation and analytics
+ * Report.js - Report generation dynamically from valid Orders (Firestore)
  * ========================= */
 
 const getDateRangeFromPredefined_ = (range) => {
@@ -61,6 +61,11 @@ const isDateInRange_ = (dateStr, startDate, endDate) => {
   }
 };
 
+/**
+ * BÁO CÁO BÁN HÀNG DỰA TRÊN DỮ LIỆU ORDER THỰC TẾ ĐANG TỒN TẠI
+ * Không tính bù trừ, không dựa vào bảng tổng hợp cũ.
+ * Xóa Order -> Báo cáo tự động giảm tương ứng!
+ */
 const getReportData = (filters = {}) => {
   try {
     const range = filters.range || "today";
@@ -78,63 +83,57 @@ const getReportData = (filters = {}) => {
       dateRange = getDateRangeFromPredefined_(range);
     }
 
-    // 1. GET ALL PAYMENTS IN DATE RANGE
-    const allPayments = getSheetData_(SHEET_NAME.PAYMENT, true) || [];
-    const filteredPayments = allPayments.filter((row) =>
-      isDateInRange_(
-        row[SHEET_SCHEMA.PAYMENT.PAID_AT],
-        dateRange.start,
-        dateRange.end,
-      ),
-    );
+    // 1. QUERY ALL ORDERS DIRECTLY FROM FIRESTORE
+    const rawOrders = firestoreQuery_("orders") || [];
 
-    // 2. TOTAL REVENUE FROM PAYMENTS
-    const totalRevenue = filteredPayments.reduce((sum, row) => {
-      return sum + toNumberSafe_(row[SHEET_SCHEMA.PAYMENT.AMOUNT], 0);
-    }, 0);
+    // 2. FILTER VALID COMPLETED / PAID ORDERS IN DATE RANGE
+    const validFilteredOrders = rawOrders.filter((order) => {
+      if (!order || !order.id) return false;
+      const status = trimSafe_(order.status);
+      const pStatus = trimSafe_(order.paymentStatus);
 
-    // 3. PAYMENT METHODS
-    const paymentMethods = {};
-    filteredPayments.forEach((row) => {
-      const provider = trimSafe_(row[SHEET_SCHEMA.PAYMENT.PROVIDER]) || "cash";
-      const amount = toNumberSafe_(row[SHEET_SCHEMA.PAYMENT.AMOUNT], 0);
-      paymentMethods[provider] = (paymentMethods[provider] || 0) + amount;
+      // Must be CLOSED or PAID
+      const isPaid = status === "CLOSED" || pStatus === "PAID";
+      if (!isPaid) return false;
+
+      // Must be in date range
+      return isDateInRange_(order.createdAt, dateRange.start, dateRange.end);
     });
 
-    const paymentMethodsArray = Object.entries(paymentMethods).map(([key, value]) => ({
+    // 3. DYNAMICALLY COMPUTE TOTAL REVENUE FROM VALID EXISTING ORDERS
+    const totalRevenue = validFilteredOrders.reduce((sum, ord) => {
+      return sum + toNumberSafe_(ord.grandTotal, 0);
+    }, 0);
+
+    // 4. DYNAMICALLY COMPUTE PAYMENT METHODS BREAKDOWN
+    const paymentMethodsMap = {};
+    validFilteredOrders.forEach((ord) => {
+      const pMethod = trimSafe_(ord.paymentMethod).toLowerCase() === "transfer" ? "transfer" : "cash";
+      const amount = toNumberSafe_(ord.grandTotal, 0);
+      paymentMethodsMap[pMethod] = (paymentMethodsMap[pMethod] || 0) + amount;
+    });
+
+    const paymentMethodsArray = Object.entries(paymentMethodsMap).map(([key, value]) => ({
       method: key,
       amount: value,
       percentage: totalRevenue > 0 ? ((value / totalRevenue) * 100).toFixed(1) : "0.0",
     }));
 
-    // 4. MAP TO COMPLETED ORDERS IN RANGE
-    const paidOrderIds = new Set(
-      filteredPayments.map((row) => trimSafe_(row[SHEET_SCHEMA.PAYMENT.ORDER_ID])).filter(Boolean)
-    );
-
-    const allOrders = getSheetData_(SHEET_NAME.ORDER, true) || [];
-    const filteredOrders = allOrders.filter((row) =>
-      paidOrderIds.has(trimSafe_(row[SHEET_SCHEMA.ORDER.ID]))
-    );
-
-    // 5. TOP PRODUCTS FROM PAID ORDERS
-    const allOrderDetails = getSheetData_(SHEET_NAME.ORDER_DETAIL, true) || [];
-    const orderDetailsInRange = allOrderDetails.filter((row) =>
-      paidOrderIds.has(trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.ORDER_ID])),
-    );
-
+    // 5. TOP PRODUCTS FROM VALID EXISTING ORDERS
     const topProducts = {};
-    orderDetailsInRange.forEach((row) => {
-      const productName =
-        trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.PRODUCT_NAME]) || "Unknown";
-      const quantity = toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.QUANTITY], 0);
-      const subtotal = toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.SUBTOTAL], 0);
-      
-      if (!topProducts[productName]) {
-        topProducts[productName] = { quantity: 0, revenue: 0 };
-      }
-      topProducts[productName].quantity += quantity;
-      topProducts[productName].revenue += subtotal;
+    validFilteredOrders.forEach((order) => {
+      const items = Array.isArray(order.items) ? order.items : [];
+      items.forEach((item) => {
+        const productName = trimSafe_(item.productName) || "Unknown";
+        const quantity = toNumberSafe_(item.quantity, 0);
+        const subtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
+
+        if (!topProducts[productName]) {
+          topProducts[productName] = { quantity: 0, revenue: 0 };
+        }
+        topProducts[productName].quantity += quantity;
+        topProducts[productName].revenue += subtotal;
+      });
     });
 
     const topProductsArray = Object.entries(topProducts)
@@ -144,29 +143,30 @@ const getReportData = (filters = {}) => {
         revenue: data.revenue,
       }))
       .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 10); // Top 10
+      .slice(0, 10);
 
-    // 6. TOP CATEGORIES FROM PAID ORDERS
-    const allProducts = getSheetData_(SHEET_NAME.PRODUCT, true) || [];
+    // 6. TOP CATEGORIES FROM VALID EXISTING ORDERS
+    const allProducts = getProducts(false) || [];
     const productCategoryMap = {};
-    allProducts.forEach((row) => {
-      const productId = trimSafe_(row[SHEET_SCHEMA.PRODUCT.ID]);
-      const category = trimSafe_(row[SHEET_SCHEMA.PRODUCT.CATEGORY]) || "Other";
-      productCategoryMap[productId] = category;
+    allProducts.forEach((prod) => {
+      productCategoryMap[prod.id] = trimSafe_(prod.category) || "Other";
     });
 
     const topCategories = {};
-    orderDetailsInRange.forEach((row) => {
-      const productId = trimSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.PRODUCT_ID]);
-      const category = productCategoryMap[productId] || "Other";
-      const quantity = toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.QUANTITY], 0);
-      const subtotal = toNumberSafe_(row[SHEET_SCHEMA.ORDER_DETAIL.SUBTOTAL], 0);
+    validFilteredOrders.forEach((order) => {
+      const items = Array.isArray(order.items) ? order.items : [];
+      items.forEach((item) => {
+        const productId = trimSafe_(item.productId);
+        const category = productCategoryMap[productId] || "Other";
+        const quantity = toNumberSafe_(item.quantity, 0);
+        const subtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
 
-      if (!topCategories[category]) {
-        topCategories[category] = { quantity: 0, revenue: 0 };
-      }
-      topCategories[category].quantity += quantity;
-      topCategories[category].revenue += subtotal;
+        if (!topCategories[category]) {
+          topCategories[category] = { quantity: 0, revenue: 0 };
+        }
+        topCategories[category].quantity += quantity;
+        topCategories[category].revenue += subtotal;
+      });
     });
 
     const topCategoriesArray = Object.entries(topCategories)
@@ -176,20 +176,19 @@ const getReportData = (filters = {}) => {
         revenue: data.revenue,
       }))
       .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 10); // Top 10
+      .slice(0, 10);
 
-    // 7. REVENUE BY DATE (Vietnam GMT+7 daily aggregation)
+    // 7. REVENUE BY DATE (GMT+7 daily aggregation)
     const revenueByDate = {};
-    filteredPayments.forEach((row) => {
-      const paidAtStr = row[SHEET_SCHEMA.PAYMENT.PAID_AT];
-      if (!paidAtStr) return;
-      const dateObj = new Date(paidAtStr);
+    validFilteredOrders.forEach((ord) => {
+      const createdStr = ord.createdAt;
+      if (!createdStr) return;
+      const dateObj = new Date(createdStr);
       if (Number.isNaN(dateObj.getTime())) return;
-      // Shift to GMT+7 to aggregate by Vietnam calendar day
       const vnDate = new Date(dateObj.getTime() + 7 * 60 * 60 * 1000);
-      const dateKey = vnDate.toISOString().split("T")[0]; // YYYY-MM-DD
+      const dateKey = vnDate.toISOString().split("T")[0];
       
-      const amount = toNumberSafe_(row[SHEET_SCHEMA.PAYMENT.AMOUNT], 0);
+      const amount = toNumberSafe_(ord.grandTotal, 0);
       revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + amount;
     });
 
@@ -205,7 +204,7 @@ const getReportData = (filters = {}) => {
         endDate: dateRange.end ? toIsoString_(dateRange.end) : null,
       },
       totalRevenue,
-      orderCount: filteredOrders.length,
+      orderCount: validFilteredOrders.length,
       paymentMethods: paymentMethodsArray,
       topProducts: topProductsArray,
       topCategories: topCategoriesArray,

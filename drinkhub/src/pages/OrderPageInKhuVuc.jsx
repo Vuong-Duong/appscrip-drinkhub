@@ -33,16 +33,26 @@ export default function OrderPage() {
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [discount, setDiscount] = useState(0);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("cash");
   const [appliedDiscountCode, setAppliedDiscountCode] = useState("");
   const [tempDiscountCode, setTempDiscountCode] = useState("");
   const [discountError, setDiscountError] = useState("");
   const [showOutOfStockModal, setShowOutOfStockModal] = useState(false);
   const [outOfStockSearch, setOutOfStockSearch] = useState("");
-  const [confirmOutOfStock, setConfirmOutOfStock] = useState({ isOpen: false, product: null });
-  const [confirmDeleteItem, setConfirmDeleteItem] = useState({ isOpen: false, item: null });
-  const [toast, setToast] = useState({ isOpen: false, message: "", type: "success" });
+  const [confirmOutOfStock, setConfirmOutOfStock] = useState({
+    isOpen: false,
+    product: null,
+  });
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState({
+    isOpen: false,
+    item: null,
+  });
+  const [toast, setToast] = useState({
+    isOpen: false,
+    message: "",
+    type: "success",
+  });
   const [isConfirmedForDisplay, setIsConfirmedForDisplay] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
 
   const showToast = (message, type = "success") => {
     setToast({ isOpen: true, message, type });
@@ -84,7 +94,6 @@ export default function OrderPage() {
     };
   }, []);
 
-
   const selectedTable = tables.find(
     (table) => String(table.id) === String(decodedTableId),
   );
@@ -96,9 +105,13 @@ export default function OrderPage() {
     const order = allOrders.find((o) => o.id === selectedTable.currentOrderId);
     if (!order) return null;
 
-    // Join order details
+    // Join order details, preferring embedded order.items
     const allDetails = storeState.orderDetails || [];
-    const items = allDetails.filter((d) => d.orderId === order.id);
+    const detailItems = allDetails.filter((d) => d.orderId === order.id);
+    const items =
+      Array.isArray(order.items) && order.items.length > 0
+        ? order.items
+        : detailItems;
     return {
       ...order,
       items,
@@ -198,12 +211,16 @@ export default function OrderPage() {
     if (!code) return 0;
     const allDiscounts = storeState.discounts || [];
     const coupon = allDiscounts.find(
-      (c) => String(c.code || "").trim().toUpperCase() === String(code).trim().toUpperCase()
+      (c) =>
+        String(c.code || "")
+          .trim()
+          .toUpperCase() === String(code).trim().toUpperCase(),
     );
     if (!coupon || coupon.status !== "ACTIVE") return 0;
 
     if (coupon.expiresAt) {
-      const isExpired = new Date(coupon.expiresAt) < new Date(new Date().setHours(0,0,0,0));
+      const isExpired =
+        new Date(coupon.expiresAt) < new Date(new Date().setHours(0, 0, 0, 0));
       if (isExpired) return 0;
     }
 
@@ -227,13 +244,17 @@ export default function OrderPage() {
     if (!code) return "";
     const allDiscounts = storeState.discounts || [];
     const coupon = allDiscounts.find(
-      (c) => String(c.code || "").trim().toUpperCase() === String(code).trim().toUpperCase()
+      (c) =>
+        String(c.code || "")
+          .trim()
+          .toUpperCase() === String(code).trim().toUpperCase(),
     );
     if (!coupon) return "Mã giảm giá không tồn tại";
     if (coupon.status !== "ACTIVE") return "Mã giảm giá không còn hoạt động";
 
     if (coupon.expiresAt) {
-      const isExpired = new Date(coupon.expiresAt) < new Date(new Date().setHours(0,0,0,0));
+      const isExpired =
+        new Date(coupon.expiresAt) < new Date(new Date().setHours(0, 0, 0, 0));
       if (isExpired) return "Mã giảm giá đã hết hạn sử dụng";
     }
 
@@ -246,7 +267,7 @@ export default function OrderPage() {
   };
 
   const activeDiscounts = useMemo(() => {
-    return (storeState.discounts || []).filter(c => c.status === "ACTIVE");
+    return (storeState.discounts || []).filter((c) => c.status === "ACTIVE");
   }, [storeState.discounts]);
 
   useEffect(() => {
@@ -422,6 +443,8 @@ export default function OrderPage() {
         discount: orderPayload.discount,
         grandTotal: orderPayload.grandTotal,
         paymentStatus: "PENDING",
+        paymentMethod:
+          orderPayload.paymentMethod === "transfer" ? "transfer" : "cash",
         createdBy: orderPayload.createdBy,
         createdAt: new Date().toISOString(),
       };
@@ -474,27 +497,34 @@ export default function OrderPage() {
 
           // Update order: change temp ID to server ID, keep all other data
           const latestOrders = appStore.get("orders") || [];
-          appStore.set("orders", latestOrders.map((o) =>
-            o.id === tempOrderId
-              ? { ...o, ...serverOrder, id: serverOrderId }
-              : o
-          ));
+          appStore.set(
+            "orders",
+            latestOrders.map((o) =>
+              o.id === tempOrderId
+                ? { ...o, ...serverOrder, id: serverOrderId }
+                : o,
+            ),
+          );
 
           // Update orderDetails: remap orderId from temp to server ID (keep local items intact)
           const latestDetails = appStore.get("orderDetails") || [];
-          appStore.set("orderDetails", latestDetails.map((d) =>
-            d.orderId === tempOrderId
-              ? { ...d, orderId: serverOrderId }
-              : d
-          ));
+          appStore.set(
+            "orderDetails",
+            latestDetails.map((d) =>
+              d.orderId === tempOrderId ? { ...d, orderId: serverOrderId } : d,
+            ),
+          );
 
           // Update table with server order ID
           const latestTables = appStore.get("tables") || [];
-          appStore.set("tables", latestTables.map((t) =>
-            String(t.id) === String(decodedTableId)
-              ? { ...t, currentOrderId: serverOrderId }
-              : t
-          ));
+          appStore.set(
+            "tables",
+            latestTables.map((t) =>
+              String(t.id) === String(decodedTableId)
+                ? { ...t, currentOrderId: serverOrderId }
+                : t,
+            ),
+          );
         })
         .catch((err) => {
           console.error("Failed to sync pay later order:", err);
@@ -572,27 +602,33 @@ export default function OrderPage() {
       orderApi
         .addItems(orderId, newItems, safeDiscount)
         .then((result) => {
-          // result is { orderId, subtotal, discount, grandTotal, addedItems }
-          // Update order totals from server
+          // result is the full updated order from server
           const latestOrders = appStore.get("orders") || [];
-          appStore.set("orders", latestOrders.map((o) =>
+          const updatedOrders = latestOrders.map((o) =>
             o.id === orderId
-              ? { ...o, subtotal: result.subtotal, discount: result.discount, grandTotal: result.grandTotal }
-              : o
-          ));
+              ? {
+                  ...o,
+                  ...(result || {}),
+                }
+              : o,
+          );
+          appStore.set("orders", updatedOrders);
 
-          // Only update details if server returned addedItems, otherwise keep local data
-          if (result.addedItems && result.addedItems.length > 0) {
+          if (result && Array.isArray(result.items)) {
             const latestDetails = appStore.get("orderDetails") || [];
-            const tempDetailIds = new Set(tempDetails.map((t) => t.id));
-            const detailsFiltered = latestDetails.filter(
-              (d) => !tempDetailIds.has(d.id),
+            const otherDetails = latestDetails.filter(
+              (d) => d.orderId !== orderId,
             );
-            const serverItems = result.addedItems.map((item) => ({
-              ...item,
+            const serverDetails = result.items.map((item, idx) => ({
+              id: item.id || `detail_${orderId}_${idx}`,
               orderId: orderId,
+              productId: item.productId,
+              productName: item.productName,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
             }));
-            appStore.set("orderDetails", [...detailsFiltered, ...serverItems]);
+            appStore.set("orderDetails", [...otherDetails, ...serverDetails]);
           }
         })
         .catch((err) => {
@@ -617,33 +653,47 @@ export default function OrderPage() {
     // Remove item from orderDetails in AppStore
     const currentDetails = appStore.get("orderDetails") || [];
     const updatedDetails = currentDetails.filter(
-      (d) => !(d.orderId === orderId && d.productId === item.productId)
+      (d) => !(d.orderId === orderId && d.productId === item.productId),
     );
     appStore.set("orderDetails", updatedDetails);
 
     // Recalculate order totals
     const remainingItems = updatedDetails.filter((d) => d.orderId === orderId);
     const newSubtotal = remainingItems.reduce(
-      (sum, d) => sum + Number(d.subtotal || 0), 0
+      (sum, d) => sum + Number(d.subtotal || 0),
+      0,
     );
     const currentOrders = appStore.get("orders") || [];
 
     if (remainingItems.length === 0) {
       // No items left -> remove order, free table
-      appStore.set("orders", currentOrders.filter((o) => o.id !== orderId));
+      appStore.set(
+        "orders",
+        currentOrders.filter((o) => o.id !== orderId),
+      );
       const currentTables = appStore.get("tables") || [];
-      appStore.set("tables", currentTables.map((t) =>
-        String(t.id) === String(decodedTableId)
-          ? { ...t, status: "available", currentOrderId: "" }
-          : t
-      ));
+      appStore.set(
+        "tables",
+        currentTables.map((t) =>
+          String(t.id) === String(decodedTableId)
+            ? { ...t, status: "available", currentOrderId: "" }
+            : t,
+        ),
+      );
     } else {
       // Recalc order
-      appStore.set("orders", currentOrders.map((o) =>
-        o.id === orderId
-          ? { ...o, subtotal: newSubtotal, grandTotal: newSubtotal - (o.discount || 0) }
-          : o
-      ));
+      appStore.set(
+        "orders",
+        currentOrders.map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                subtotal: newSubtotal,
+                grandTotal: newSubtotal - (o.discount || 0),
+              }
+            : o,
+        ),
+      );
     }
 
     // Restore stock
@@ -868,7 +918,11 @@ export default function OrderPage() {
                     Giảm giá
                   </p>
                   <p className="text-xs text-red-600 font-bold truncate mt-0.5">
-                    {appliedDiscountCode ? `${appliedDiscountCode} (-${formatCurrency(discount)})` : discount > 0 ? formatCurrency(discount) : "0 đ"}
+                    {appliedDiscountCode
+                      ? `${appliedDiscountCode} (-${formatCurrency(discount)})`
+                      : discount > 0
+                        ? formatCurrency(discount)
+                        : "0 đ"}
                   </p>
                 </div>
               </button>
@@ -892,7 +946,9 @@ export default function OrderPage() {
                     <div className="flex items-center gap-3 shrink-0">
                       <p>{formatCurrency(Number(item.subtotal || 0))}</p>
                       <button
-                        onClick={() => setConfirmDeleteItem({ isOpen: true, item })}
+                        onClick={() =>
+                          setConfirmDeleteItem({ isOpen: true, item })
+                        }
                         className="w-7 h-7 rounded-full bg-red-100 text-red-500 hover:bg-red-200 flex items-center justify-center text-sm font-bold transition"
                         title="Xóa món"
                       >
@@ -979,7 +1035,7 @@ export default function OrderPage() {
                 <span>{formatCurrency(total)}</span>
               </div>
 
-              <div className="flex gap-2 mb-4">
+              <div className="mb-4 flex gap-2">
                 <button
                   onClick={() => setPaymentMethod("cash")}
                   className={`flex-1 py-3 rounded-2xl font-medium border-2 transition ${
@@ -1001,6 +1057,13 @@ export default function OrderPage() {
                   Chuyển khoản
                 </button>
               </div>
+
+              {paymentMethod === "transfer" && (
+                <div className="mb-4 rounded-2xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">
+                  Thanh toán bằng VietQR: khách sẽ quét mã để chuyển khoản, sau
+                  đó nhân viên xác nhận đã thanh toán trên POS.
+                </div>
+              )}
 
               {/* Nút Xác nhận đơn - gửi cho khách xem */}
               {!isConfirmedForDisplay && (
@@ -1026,7 +1089,9 @@ export default function OrderPage() {
                 >
                   {isSubmitting
                     ? "Đang xử lý..."
-                    : `💳 Thanh toán ${paymentMethod === "cash" ? "tiền mặt" : "chuyển khoản"}`}
+                    : paymentMethod === "cash"
+                      ? "💳 Thanh toán tiền mặt"
+                      : "💳 Đã thanh toán"}
                 </button>
               )}
 
@@ -1037,9 +1102,7 @@ export default function OrderPage() {
                   disabled={isSubmitting}
                   className="w-full border-2 border-blue-600 text-blue-600 hover:bg-blue-50 disabled:opacity-50 py-4 rounded-2xl font-bold text-lg transition"
                 >
-                  {isSubmitting
-                    ? "Đang xử lý..."
-                    : "➕ Gọi thêm món"}
+                  {isSubmitting ? "Đang xử lý..." : "➕ Gọi thêm món"}
                 </button>
               )}
             </div>
@@ -1142,7 +1205,9 @@ export default function OrderPage() {
                       } else {
                         setDiscountError("");
                         const amt = calculateDiscount(trimmedCode, subtotal);
-                        alert(`Áp dụng mã thành công! Giảm ${formatCurrency(amt)}`);
+                        alert(
+                          `Áp dụng mã thành công! Giảm ${formatCurrency(amt)}`,
+                        );
                       }
                     }}
                     className="px-5 py-3 bg-blue-600 text-white font-semibold rounded-2xl hover:bg-blue-700 transition"
@@ -1151,13 +1216,22 @@ export default function OrderPage() {
                   </button>
                 </div>
                 {discountError && (
-                  <p className="text-xs text-red-500 font-semibold mt-2">{discountError}</p>
+                  <p className="text-xs text-red-500 font-semibold mt-2">
+                    {discountError}
+                  </p>
                 )}
-                {!discountError && tempDiscountCode && (
+                {!discountError &&
+                  tempDiscountCode &&
                   (() => {
-                    const err = getCodeValidationError(tempDiscountCode.trim(), subtotal);
+                    const err = getCodeValidationError(
+                      tempDiscountCode.trim(),
+                      subtotal,
+                    );
                     if (!err && tempDiscountCode.trim()) {
-                      const amt = calculateDiscount(tempDiscountCode.trim(), subtotal);
+                      const amt = calculateDiscount(
+                        tempDiscountCode.trim(),
+                        subtotal,
+                      );
                       return (
                         <p className="text-xs text-emerald-600 font-semibold mt-2">
                           Mã hợp lệ! Số tiền giảm: {formatCurrency(amt)}
@@ -1165,21 +1239,28 @@ export default function OrderPage() {
                       );
                     }
                     return null;
-                  })()
-                )}
+                  })()}
               </div>
 
               {/* List of active discounts */}
               <div className="border-t pt-4">
-                <p className="text-sm font-medium text-gray-500 mb-3">Mã giảm giá khả dụng</p>
+                <p className="text-sm font-medium text-gray-500 mb-3">
+                  Mã giảm giá khả dụng
+                </p>
                 {activeDiscounts.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">Không có mã giảm giá nào đang hoạt động</p>
+                  <p className="text-xs text-gray-400 italic">
+                    Không có mã giảm giá nào đang hoạt động
+                  </p>
                 ) : (
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {activeDiscounts.map((coupon) => {
-                      const isSelectable = subtotal >= (Number(coupon.minOrderValue) || 0);
-                      const isExpired = coupon.expiresAt && new Date(coupon.expiresAt) < new Date(new Date().setHours(0,0,0,0));
-                      
+                      const isSelectable =
+                        subtotal >= (Number(coupon.minOrderValue) || 0);
+                      const isExpired =
+                        coupon.expiresAt &&
+                        new Date(coupon.expiresAt) <
+                          new Date(new Date().setHours(0, 0, 0, 0));
+
                       return (
                         <button
                           key={coupon.id}
@@ -1193,20 +1274,26 @@ export default function OrderPage() {
                             setDiscountError("");
                           }}
                           className={`w-full text-left p-3 rounded-2xl border transition-all flex flex-col justify-between ${
-                            tempDiscountCode.trim().toUpperCase() === String(coupon.code).trim().toUpperCase()
+                            tempDiscountCode.trim().toUpperCase() ===
+                            String(coupon.code).trim().toUpperCase()
                               ? "border-blue-600 bg-blue-50/50"
                               : "border-gray-100 hover:border-gray-300"
-                          } ${(!isSelectable || isExpired) ? "opacity-60" : ""}`}
+                          } ${!isSelectable || isExpired ? "opacity-60" : ""}`}
                         >
                           <div className="flex justify-between w-full items-baseline">
-                            <span className="font-mono font-bold text-blue-700">{coupon.code}</span>
+                            <span className="font-mono font-bold text-blue-700">
+                              {coupon.code}
+                            </span>
                             <span className="text-xs text-gray-500">
-                              {coupon.type === "percent" ? `Giảm ${coupon.value}%` : `Giảm ${formatCurrency(coupon.value)}`}
+                              {coupon.type === "percent"
+                                ? `Giảm ${coupon.value}%`
+                                : `Giảm ${formatCurrency(coupon.value)}`}
                             </span>
                           </div>
                           <div className="flex justify-between w-full mt-1 items-center">
                             <span className="text-[10px] text-gray-400">
-                              Đơn tối thiểu: {formatCurrency(coupon.minOrderValue)}
+                              Đơn tối thiểu:{" "}
+                              {formatCurrency(coupon.minOrderValue)}
                             </span>
                             {coupon.expiresAt && (
                               <span className="text-[10px] text-gray-400">
@@ -1273,7 +1360,7 @@ export default function OrderPage() {
                 &times;
               </button>
             </div>
-            
+
             <div className="p-4 border-b">
               <input
                 type="text"
@@ -1286,13 +1373,33 @@ export default function OrderPage() {
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {products
-                .filter((p) => p.status !== "DELETED" && String(p.name || "").toLowerCase().includes(outOfStockSearch.toLowerCase()))
+                .filter(
+                  (p) =>
+                    p.status !== "DELETED" &&
+                    String(p.name || "")
+                      .toLowerCase()
+                      .includes(outOfStockSearch.toLowerCase()),
+                )
                 .map((product) => (
-                  <div key={product.id} className="flex items-center justify-between p-3.5 bg-gray-50 rounded-2xl border border-gray-100">
+                  <div
+                    key={product.id}
+                    className="flex items-center justify-between p-3.5 bg-gray-50 rounded-2xl border border-gray-100"
+                  >
                     <div className="min-w-0 flex-1 pr-2">
-                      <p className="font-bold text-gray-800 truncate text-base">{product.name}</p>
+                      <p className="font-bold text-gray-800 truncate text-base">
+                        {product.name}
+                      </p>
                       <p className="text-xs text-gray-500">
-                        {product.category} &bull; Tồn: <span className={product.stock === 0 ? "text-red-500 font-bold" : "text-gray-700 font-semibold"}>{product.stock}</span>
+                        {product.category} &bull; Tồn:{" "}
+                        <span
+                          className={
+                            product.stock === 0
+                              ? "text-red-500 font-bold"
+                              : "text-gray-700 font-semibold"
+                          }
+                        >
+                          {product.stock}
+                        </span>
                       </p>
                     </div>
                     <div>
@@ -1308,13 +1415,21 @@ export default function OrderPage() {
                       ) : (
                         <button
                           onClick={async () => {
-                            const newStockStr = prompt(`Nhập số lượng tồn kho mới cho "${product.name}":`, "100");
+                            const newStockStr = prompt(
+                              `Nhập số lượng tồn kho mới cho "${product.name}":`,
+                              "100",
+                            );
                             if (newStockStr !== null) {
                               const qty = parseInt(newStockStr, 10);
                               if (!isNaN(qty) && qty >= 0) {
                                 try {
-                                  await CrudService.update("products", { ...product, stock: qty });
-                                  showToast(`Đã cập nhật lại tồn kho món "${product.name}" thành ${qty}!`);
+                                  await CrudService.update("products", {
+                                    ...product,
+                                    stock: qty,
+                                  });
+                                  showToast(
+                                    `Đã cập nhật lại tồn kho món "${product.name}" thành ${qty}!`,
+                                  );
                                 } catch (err) {
                                   showToast(`Lỗi: ${err.message}`, "error");
                                 }
@@ -1350,14 +1465,22 @@ export default function OrderPage() {
           <div className="bg-white rounded-3xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <div className="text-center">
               <span className="text-4xl">🚨</span>
-              <h3 className="text-xl font-bold text-gray-900 mt-3">Xác nhận báo hết</h3>
+              <h3 className="text-xl font-bold text-gray-900 mt-3">
+                Xác nhận báo hết
+              </h3>
               <p className="text-gray-500 text-sm mt-2">
-                Bạn có chắc chắn muốn báo hết món <strong className="text-gray-800 font-semibold">"{confirmOutOfStock.product?.name}"</strong> khẩn cấp không?
+                Bạn có chắc chắn muốn báo hết món{" "}
+                <strong className="text-gray-800 font-semibold">
+                  "{confirmOutOfStock.product?.name}"
+                </strong>{" "}
+                khẩn cấp không?
               </p>
             </div>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={() => setConfirmOutOfStock({ isOpen: false, product: null })}
+                onClick={() =>
+                  setConfirmOutOfStock({ isOpen: false, product: null })
+                }
                 className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-2xl transition-all cursor-pointer"
               >
                 Hủy
@@ -1367,7 +1490,10 @@ export default function OrderPage() {
                   const product = confirmOutOfStock.product;
                   setConfirmOutOfStock({ isOpen: false, product: null });
                   try {
-                    await CrudService.update("products", { ...product, stock: 0 });
+                    await CrudService.update("products", {
+                      ...product,
+                      stock: 0,
+                    });
                     showToast(`Đã báo hết món "${product.name}" thành công!`);
                   } catch (err) {
                     showToast(`Lỗi: ${err.message}`, "error");
@@ -1387,9 +1513,15 @@ export default function OrderPage() {
           <div className="bg-white rounded-3xl w-full max-w-sm mx-4 p-6 shadow-2xl">
             <div className="text-center">
               <span className="text-4xl">⚠️</span>
-              <h3 className="text-xl font-bold text-gray-900 mt-3">Xác nhận xóa món</h3>
+              <h3 className="text-xl font-bold text-gray-900 mt-3">
+                Xác nhận xóa món
+              </h3>
               <p className="text-gray-500 text-sm mt-2">
-                Món <strong className="text-gray-800 font-semibold">"{confirmDeleteItem.item?.productName}"</strong> đã được gửi ra bar/bếp.
+                Món{" "}
+                <strong className="text-gray-800 font-semibold">
+                  "{confirmDeleteItem.item?.productName}"
+                </strong>{" "}
+                đã được gửi ra bar/bếp.
               </p>
               <p className="text-red-500 text-xs font-semibold mt-2">
                 Bạn có chắc chắn muốn xóa khỏi đơn hàng không?
@@ -1397,7 +1529,9 @@ export default function OrderPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={() => setConfirmDeleteItem({ isOpen: false, item: null })}
+                onClick={() =>
+                  setConfirmDeleteItem({ isOpen: false, item: null })
+                }
                 className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-2xl transition-all cursor-pointer"
               >
                 Hủy
@@ -1419,9 +1553,11 @@ export default function OrderPage() {
 
       {toast.isOpen && (
         <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 z-[200]">
-          <div className={`px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-2 font-semibold text-sm sm:text-base text-white ${
-            toast.type === "error" ? "bg-red-600" : "bg-emerald-600"
-          }`}>
+          <div
+            className={`px-6 py-3.5 rounded-2xl shadow-xl flex items-center gap-2 font-semibold text-sm sm:text-base text-white ${
+              toast.type === "error" ? "bg-red-600" : "bg-emerald-600"
+            }`}
+          >
             <span>{toast.type === "error" ? "❌" : "✅"}</span>
             <span>{toast.message}</span>
           </div>

@@ -1,5 +1,5 @@
 /* =========================
- * Sync.gs - Delta Sync cho Frontend
+ * Sync.gs - Delta Sync cho Frontend - Firestore
  * ========================= */
 
 // syncVersionCounter persisted in CacheService, khong reset trong runtime ngan.
@@ -33,19 +33,17 @@ const buildDelta = (entity, action, payload) => {
 
 const pushDelta = (entity, action, payload) => {
   const delta = buildDelta(entity, action, payload);
+  const logId = generateId_("delta");
 
-  appendRowsBatch_(SHEET_NAME.LOG, [
-    [
-      generateId_("delta"),
-      "DELTA",
-      entity,
-      "system",
-      JSON.stringify(delta),
-      delta.timestamp,
-    ],
-  ]);
+  firestoreSet_("logs", logId, {
+    id: logId,
+    action: "DELTA",
+    target: entity,
+    account: "system",
+    details: JSON.stringify(delta),
+    timestamp: delta.timestamp,
+  });
 
-  invalidateSheetCache_(SHEET_NAME.LOG);
   return delta;
 };
 
@@ -60,23 +58,23 @@ const pushDeltaSafe_ = (entity, action, payload) => {
 
 // API cho Frontend polling.
 const getDeltaSince = (clientVersion = 0) => {
-  const rows = getSheetData_(SHEET_NAME.LOG, false);
+  const docs = firestoreQuery_("logs", {
+    filters: [{ field: "action", op: "EQUAL", value: "DELTA" }],
+    limit: 100,
+  });
+
   const allDeltas = [];
 
-  for (let i = rows.length - 1; i >= 1; i--) {
-    if (rows[i][SHEET_SCHEMA.LOG.ACTION] !== "DELTA") continue;
-
-    const delta = parseJsonSafe_(
-      rows[i][SHEET_SCHEMA.LOG.DETAILS],
-      parseJsonSafe_(rows[i][SHEET_SCHEMA.LOG.TARGET]),
-    );
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    const delta = parseJsonSafe_(doc.details);
 
     if (delta && delta.version > clientVersion) {
       allDeltas.push(delta);
     }
   }
 
-  const sortedDeltas = allDeltas.reverse();
+  const sortedDeltas = allDeltas.sort((a, b) => a.version - b.version);
   const limitedDeltas = sortedDeltas.slice(-APP_CONFIG.DELTA_LIMIT);
 
   return {

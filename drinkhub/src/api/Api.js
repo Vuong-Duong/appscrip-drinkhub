@@ -635,6 +635,32 @@ export const orderApi = {
   getOrderByTicket(ticketId) {
     return request("GET_ORDER_BY_TICKET", { ticketId });
   },
+
+  deleteOrder(orderId) {
+    const user = getStoredAuthUser();
+    if (!user || user.role !== "admin") {
+      return Promise.reject(
+        new Error("PERMISSION_DENIED: Chỉ Admin/Owner mới có quyền xóa Order")
+      );
+    }
+
+    const orders = appStore.get("orders") || [];
+    const targetOrder = orders.find((o) => o.id === orderId);
+
+    if (targetOrder && targetOrder.tableId) {
+      appStore.update("tables", {
+        id: String(targetOrder.tableId),
+        status: "available",
+      });
+    }
+
+    appStore.remove("orders", orderId);
+
+    return request("DELETE_ORDER", {
+      orderId,
+      userRole: user.role,
+    });
+  },
 };
 
 /* =========================
@@ -850,6 +876,10 @@ export const tableApi = {
       });
 
     return readLocalArray(LOCAL_DB_KEY.TABLES);
+  },
+
+  async createTable(name) {
+    return request("CREATE_TABLE", { name });
   },
 };
 
@@ -1117,6 +1147,16 @@ export const shiftApi = {
 
     return updated.find((s) => s.id === shiftId) || null;
   },
+
+  getReconciliation(filters = {}) {
+    const user = getStoredAuthUser();
+    return request("GET_SHIFT_RECONCILIATION", { ...filters, userRole: user?.role });
+  },
+
+  addCashAdjustment(payload) {
+    const user = getStoredAuthUser();
+    return request("ADD_CASH_ADJUSTMENT", { ...payload, userRole: user?.role });
+  },
 };
 
 /* =========================
@@ -1136,6 +1176,28 @@ export const reportApi = {
 export const uploadApi = {
   uploadImageToGrive(base64, fileName) {
     return request("UPLOAD_IMAGE", { base64, fileName });
+  },
+};
+
+/* =========================
+ * INVENTORY API
+ * ========================= */
+
+export const inventoryApi = {
+  getIngredients() {
+    return request("GET_INGREDIENTS");
+  },
+  createIngredient(payload) {
+    return request("CREATE_INGREDIENT", payload);
+  },
+  addInventory(payload) {
+    return request("ADD_INVENTORY", payload);
+  },
+  stocktakeInventory(payload) {
+    return request("STOCKTAKE_INVENTORY", payload);
+  },
+  getInventoryHistory(filters = {}) {
+    return request("GET_INVENTORY_HISTORY", filters);
   },
 };
 

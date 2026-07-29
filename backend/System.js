@@ -1,5 +1,5 @@
 /* =========================
- * System.gs
+ * System.gs - Firestore
  * ========================= */
 
 function now_() {
@@ -9,7 +9,6 @@ function now_() {
 // =========================
 // LOGGING HELPERS
 // =========================
-// logAction_ được khai báo ở Core.js, không cần lặp lại
 
 function logPayment_(orderId, paymentInfo, account) {
   writeLog_("PAYMENT", "ORDER_" + orderId, account || "system", paymentInfo);
@@ -27,34 +26,32 @@ function logAudit_(action, target, account, details) {
 // QUEUE & JOB MANAGEMENT
 // =========================
 function enqueueJob_(type, payload) {
-  appendRowsBatch_(APP_CONFIG.QUEUE_SHEET, [
-    [
-      generateId_("job"),
-      type,
-      JSON.stringify(payload),
-      "PENDING",
-      "",
-      toIsoString_(new Date()),
-    ],
-  ]);
+  const jobId = generateId_("job");
+  firestoreSet_("system_queue", jobId, {
+    id: jobId,
+    type: type,
+    payload: JSON.stringify(payload),
+    status: "PENDING",
+    error: "",
+    createdAt: toIsoString_(new Date()),
+  });
 }
 
 /**
  * Process pending jobs (chạy theo schedule)
  */
 function processQueue_() {
-  const rows = getSheetData_(APP_CONFIG.QUEUE_SHEET, false);
+  const docs = firestoreQuery_("system_queue", {
+    filters: [{ field: "status", op: "EQUAL", value: "PENDING" }],
+    limit: 50,
+  });
+
   let processed = 0;
-  const updatedRows = [];
+  const writes = [];
 
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const status = trimSafe_(row[3]);
-
-    if (status !== "PENDING") continue;
-
-    const jobType = trimSafe_(row[1]);
-    const payload = parseJsonSafe_(row[2]);
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    const jobType = trimSafe_(doc.type);
 
     try {
       switch (jobType) {
@@ -68,31 +65,37 @@ function processQueue_() {
           logSystemError_({ type: "UNKNOWN_JOB", jobType });
           throw new Error("UNKNOWN_JOB: " + jobType);
       }
-      row[3] = "COMPLETED";
+
+      writes.push({
+        type: "update",
+        collection: "system_queue",
+        id: doc.id,
+        data: {
+          status: "COMPLETED",
+          completedAt: toIsoString_(new Date()),
+        },
+      });
       processed++;
     } catch (err) {
-      row[3] = "FAILED";
-      row[4] = err.message; // Add error message
+      writes.push({
+        type: "update",
+        collection: "system_queue",
+        id: doc.id,
+        data: {
+          status: "FAILED",
+          error: err.message,
+          failedAt: toIsoString_(new Date()),
+        },
+      });
       logSystemError_({ type: "JOB_FAILED", jobType, error: err.message });
     }
-
-    updatedRows.push({
-      rowIndex: i + 1,
-      values: row,
-    });
   }
 
-  // ✓ Write back updated rows
-  if (updatedRows.length > 0) {
-    for (let i = 0; i < updatedRows.length; i++) {
-      batchWriteRows_(APP_CONFIG.QUEUE_SHEET, updatedRows[i].rowIndex, 1, [
-        updatedRows[i].values,
-      ]);
-    }
-    invalidateSheetCache_(APP_CONFIG.QUEUE_SHEET);
+  if (writes.length > 0) {
+    firestoreBatchWrite_(writes);
   }
 
-  return { processed, total: updatedRows.length };
+  return { processed, total: docs.length };
 }
 
 // =========================
@@ -100,35 +103,33 @@ function processQueue_() {
 // =========================
 function archiveClosedOrders_() {
   // Lấy các order đã close > 7 ngày
-  const rows = getSheetData_(SHEET_NAME.ORDER, false);
+  const docs = firestoreQuery_("orders", {
+    filters: [{ field: "status", op: "EQUAL", value: "CLOSED" }],
+    limit: 100,
+  });
+
   const cutoffTime = new Date();
   cutoffTime.setDate(cutoffTime.getDate() - 7);
   const cutoffIso = toIsoString_(cutoffTime);
 
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const status = trimSafe_(row[SHEET_SCHEMA.ORDER.STATUS]);
-    const createdAt = trimSafe_(row[SHEET_SCHEMA.ORDER.CREATED_AT]);
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i];
+    const createdAt = trimSafe_(doc.createdAt);
 
-    if (status === "CLOSED" && createdAt < cutoffIso) {
-      // Could archive to separate sheet or delete
-      logAction_("ARCHIVE_ORDER", row[0], "system", { createdAt });
+    if (createdAt < cutoffIso) {
+      logAction_("ARCHIVE_ORDER", doc.id, "system", { createdAt });
     }
   }
 }
 
 function repairOrderState_() {
-  // Kiểm tra inconsistency trong data
-  const orderRows = getSheetData_(SHEET_NAME.ORDER, false);
-  const snapshotRows = getSheetData_(SHEET_NAME.ORDER_SNAPSHOT, false);
+  const orders = firestoreQuery_("orders", { limit: 100 });
+  const snapshots = firestoreQuery_("order_snapshots", { limit: 100 });
 
-  const snapshotIds = new Set();
-  for (let i = 1; i < snapshotRows.length; i++) {
-    snapshotIds.add(trimSafe_(snapshotRows[i][0]));
-  }
+  const snapshotIds = new Set(snapshots.map((s) => s.id));
 
-  for (let i = 1; i < orderRows.length; i++) {
-    const orderId = trimSafe_(orderRows[i][0]);
+  for (let i = 0; i < orders.length; i++) {
+    const orderId = orders[i].id;
     if (!snapshotIds.has(orderId)) {
       logSystemError_({
         type: "MISSING_SNAPSHOT",
@@ -141,10 +142,6 @@ function repairOrderState_() {
 // =========================
 // GMAIL PAYMENT FALLBACK JOB
 // =========================
-/**
- * Chạy mỗi 5 phút - Check Gmail nếu Android notification miss
- * Setup: Apps Script → Trigger → Time-driven → Minutes timer → Every 5 minutes
- */
 function gmailPaymentFallbackJob() {
   try {
     checkGmailForPaymentFallback_();
@@ -173,14 +170,10 @@ function checkGmailForPaymentFallback_() {
 // WARMUP & MAINTENANCE
 // =========================
 const warmupCache_ = () => {
-  getSheetData_(SHEET_NAME.PRODUCT);
-  getSheetData_(SHEET_NAME.TABLE);
-  getSheetData_(SHEET_NAME.ACCOUNT);
+  firestoreQuery_("products", { limit: 10 });
+  firestoreQuery_("tables", { limit: 10 });
 };
 
-/**
- * Trigger hàng giờ (Schedule via Google Apps Script trigger)
- */
 function hourlyMaintenance_() {
   warmupCache_();
   processQueue_();

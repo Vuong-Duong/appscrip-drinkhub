@@ -79,6 +79,7 @@ const SHEET_SCHEMA = Object.freeze({
     PAYMENT_STATUS: 7,
     CREATED_BY: 8,
     CREATED_AT: 9,
+    PAYMENT_METHOD: 10,
   }),
   ORDER_DETAIL: Object.freeze({
     ID: 0,
@@ -362,17 +363,23 @@ const getStoreInfo_ = (useCache = true) => {
 };
 
 const writeLog_ = (action, target, account, details) => {
-  const row = [
-    generateId_("log"),
-    trimSafe_(action),
-    trimSafe_(target),
-    trimSafe_(account || "system"),
-    typeof details === "string" ? details : JSON.stringify(details || {}),
-    toIsoString_(new Date()),
-  ];
+  const logId = generateId_("log");
+  const timestamp = toIsoString_(new Date());
+  const logData = {
+    id: logId,
+    action: trimSafe_(action),
+    target: trimSafe_(target),
+    account: trimSafe_(account || "system"),
+    details: typeof details === "string" ? details : JSON.stringify(details || {}),
+    timestamp: timestamp,
+  };
 
-  appendRowsBatch_(SHEET_NAME.LOG, [row]);
-  return { id: row[SHEET_SCHEMA.LOG.ID] };
+  try {
+    firestoreSet_("logs", logId, logData);
+  } catch (e) {
+    console.error("writeLog_ firestoreSet_ error:", e.message);
+  }
+  return { id: logId };
 };
 
 const logAction_ = (action, target, account, details) => {
@@ -496,7 +503,7 @@ function withRetry_(callback, maxRetries, baseDelayMs) {
   }
 
   throw new Error(
-    "RETRY_EXHAUSTED (" + maxRetries + " attempts): " + lastError.message
+    "RETRY_EXHAUSTED (" + maxRetries + " attempts): " + lastError.message,
   );
 }
 

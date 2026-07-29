@@ -5,6 +5,8 @@ import Footer from "../components/Footer";
 import appStore from "../services/AppStore";
 import BootstrapService from "../services/BootstrapService";
 import CustomerDisplayService from "../services/CustomerDisplayService";
+import { tableApi } from "../api/Api";
+import { getStoredAuthUser } from "../utils/auth";
 
 export default function TablePage() {
   const navigate = useNavigate();
@@ -13,6 +15,10 @@ export default function TablePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTableName, setNewTableName] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [addError, setAddError] = useState("");
 
   // Reset customer display to welcome state when entering table dashboard
   useEffect(() => {
@@ -45,6 +51,25 @@ export default function TablePage() {
       setError(err.message || "Tải lại thất bại");
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleCreateTable = async () => {
+    const name = newTableName.trim();
+    if (!name) { setAddError("Vui lòng nhập tên bàn"); return; }
+    setIsCreating(true);
+    setAddError("");
+    try {
+      const newTable = await tableApi.createTable(name);
+      // Optimistic update AppStore
+      const current = appStore.get("tables") || [];
+      appStore.set("tables", [...current, { ...newTable, status: "available" }]);
+      setNewTableName("");
+      setShowAddModal(false);
+    } catch (err) {
+      setAddError(err.message || "Tạo bàn thất bại");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -94,6 +119,12 @@ export default function TablePage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setNewTableName(""); setAddError(""); setShowAddModal(true); }}
+              className="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl px-5 py-3 shadow-sm active:scale-95 transition-all text-sm font-semibold flex items-center gap-2"
+            >
+              ＋ Thêm bàn
+            </button>
             <button
               onClick={handleRefresh}
               className="bg-white border border-gray-200 hover:border-blue-500 hover:text-blue-600 rounded-2xl px-5 py-3 shadow-sm active:scale-95 transition-all text-sm font-medium flex items-center gap-2"
@@ -195,6 +226,48 @@ export default function TablePage() {
       </div>
 
       <Footer />
+
+      {/* Modal tạo bàn mới */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-white rounded-3xl w-full max-w-sm mx-4 shadow-xl">
+            <div className="p-6 border-b">
+              <h3 className="text-xl font-bold">Thêm bàn mới</h3>
+            </div>
+            <div className="p-6">
+              <label className="block text-sm text-gray-600 mb-2">Tên bàn</label>
+              <input
+                type="text"
+                value={newTableName}
+                onChange={(e) => { setNewTableName(e.target.value); setAddError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateTable()}
+                placeholder="VD: Bàn 5, Bàn VIP 1..."
+                className="w-full border-2 border-gray-200 focus:border-blue-500 rounded-2xl px-4 py-3 outline-none text-base font-semibold"
+                autoFocus
+              />
+              {addError && (
+                <p className="text-sm text-red-600 mt-2">{addError}</p>
+              )}
+            </div>
+            <div className="flex border-t">
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="flex-1 py-4 font-medium text-gray-600 border-r hover:bg-gray-50 rounded-bl-3xl"
+                disabled={isCreating}
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleCreateTable}
+                disabled={isCreating || !newTableName.trim()}
+                className="flex-1 py-4 bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:bg-gray-300 rounded-br-3xl transition"
+              >
+                {isCreating ? "Đang tạo..." : "Tạo bàn"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

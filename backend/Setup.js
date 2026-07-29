@@ -52,6 +52,7 @@ const SHEET_SETUP_DEFINITIONS_ = [
       "Trạng thái thanh toán",
       "Người tạo",
       "Ngày tạo",
+      "Phương thức thanh toán",
     ],
   },
   {
@@ -68,12 +69,7 @@ const SHEET_SETUP_DEFINITIONS_ = [
   },
   {
     name: SHEET_NAME.ORDER_SNAPSHOT,
-    headers: [
-      "Mã đơn",
-      "Dữ liệu snapshot",
-      "Phiên bản",
-      "Thời gian đóng",
-    ],
+    headers: ["Mã đơn", "Dữ liệu snapshot", "Phiên bản", "Thời gian đóng"],
   },
   {
     name: SHEET_NAME.TABLE,
@@ -141,14 +137,7 @@ const SHEET_SETUP_DEFINITIONS_ = [
   },
   {
     name: APP_CONFIG.QUEUE_SHEET,
-    headers: [
-      "Mã job",
-      "Loại",
-      "Dữ liệu",
-      "Trạng thái",
-      "Lỗi",
-      "Thời gian",
-    ],
+    headers: ["Mã job", "Loại", "Dữ liệu", "Trạng thái", "Lỗi", "Thời gian"],
   },
   {
     name: APP_CONFIG.INVENTORY_JOURNAL_SHEET,
@@ -185,16 +174,26 @@ const isHeaderRowEmpty_ = (sheet, colCount) => {
 const applySheetHeaders_ = (sheet, headers, sheetJustCreated) => {
   const colCount = headers.length;
 
-  if (sheetJustCreated || sheet.getLastRow() === 0 || isHeaderRowEmpty_(sheet, colCount)) {
+  if (
+    sheetJustCreated ||
+    sheet.getLastRow() === 0 ||
+    isHeaderRowEmpty_(sheet, colCount)
+  ) {
     if (sheet.getMaxColumns() < colCount) {
-      sheet.insertColumnsAfter(sheet.getMaxColumns(), colCount - sheet.getMaxColumns());
+      sheet.insertColumnsAfter(
+        sheet.getMaxColumns(),
+        colCount - sheet.getMaxColumns(),
+      );
     }
     sheet.getRange(1, 1, 1, colCount).setValues([headers]);
     formatSheetHeaderRow_(sheet, colCount);
     return { headersApplied: true };
   }
 
-  return { headersApplied: false, skipped: "Đã có tiêu đề hoặc dữ liệu ở hàng 1" };
+  return {
+    headersApplied: false,
+    skipped: "Đã có tiêu đề hoặc dữ liệu ở hàng 1",
+  };
 };
 
 /** Đảm bảo các khóa STORE_NAME, ADDRESS, STORE_ID tồn tại trong sheet Thông tin quán */

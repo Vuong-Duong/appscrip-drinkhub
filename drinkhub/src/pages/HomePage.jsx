@@ -108,8 +108,18 @@ export default function HomePage() {
 
               {/* Report */}
               <button
-                onClick={() => navigate("/dashboard")}
-                className="bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm flex-1 text-left hover:opacity-95 transition cursor-pointer"
+                onClick={() => {
+                  if (user?.role !== "admin") {
+                    alert("Chỉ tài khoản Admin mới có quyền truy cập Báo cáo!");
+                    return;
+                  }
+                  navigate("/dashboard");
+                }}
+                className={`bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm flex-1 text-left hover:opacity-95 transition ${
+                  user?.role === "admin"
+                    ? "cursor-pointer"
+                    : "cursor-not-allowed opacity-80"
+                }`}
               >
                 <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
                   <span className="text-2xl sm:text-3xl">📈</span>

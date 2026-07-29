@@ -1,17 +1,17 @@
 /* =========================
- * Coupon.gs - Quản lý mã khuyến mãi
+ * Coupon.gs - Quản lý mã khuyến mãi - Firestore
  * ========================= */
 
-function mapCouponRow_(row) {
+function mapCouponDoc_(doc) {
   return {
-    id: trimSafe_(row[SHEET_SCHEMA.COUPON.ID]),
-    code: trimSafe_(row[SHEET_SCHEMA.COUPON.CODE]),
-    type: trimSafe_(row[SHEET_SCHEMA.COUPON.TYPE]).toLowerCase(),
-    value: toNumberSafe_(row[SHEET_SCHEMA.COUPON.VALUE]),
-    minOrderValue: toNumberSafe_(row[SHEET_SCHEMA.COUPON.MIN_ORDER_VALUE]),
-    maxDiscount: toNumberSafe_(row[SHEET_SCHEMA.COUPON.MAX_DISCOUNT]),
-    status: trimSafe_(row[SHEET_SCHEMA.COUPON.STATUS]).toUpperCase(),
-    expiresAt: trimSafe_(row[SHEET_SCHEMA.COUPON.EXPIRES_AT]),
+    id: trimSafe_(doc.id),
+    code: trimSafe_(doc.code),
+    type: trimSafe_(doc.type).toLowerCase(),
+    value: toNumberSafe_(doc.value),
+    minOrderValue: toNumberSafe_(doc.minOrderValue),
+    maxDiscount: toNumberSafe_(doc.maxDiscount),
+    status: trimSafe_(doc.status).toUpperCase(),
+    expiresAt: trimSafe_(doc.expiresAt),
   };
 }
 
@@ -37,11 +37,11 @@ function normalizeCouponPayload_(payload) {
 }
 
 function getCoupons(activeOnly) {
-  const rows = getSheetData_(SHEET_NAME.COUPON);
+  const docs = firestoreQuery_("discounts");
   const coupons = [];
 
-  for (let i = 1; i < rows.length; i++) {
-    const coupon = mapCouponRow_(rows[i]);
+  for (let i = 0; i < docs.length; i++) {
+    const coupon = mapCouponDoc_(docs[i]);
     if (!coupon.id) continue;
     if (coupon.status === "DELETED") continue;
     if (activeOnly && coupon.status !== "ACTIVE") continue;
@@ -57,19 +57,25 @@ function createCoupon(payload) {
     const existing = getCoupons(false).find((coupon) => coupon.code === data.code);
     if (existing) throw new Error("COUPON_CODE_EXISTS");
 
-    const row = [
-      generateId_("coupon"),
-      data.code,
-      data.type,
-      data.value,
-      data.minOrderValue,
-      data.maxDiscount,
-      data.status,
-      data.expiresAt,
-    ];
+    const couponId = generateId_("coupon");
+    const now = toIsoString_(new Date());
 
-    appendRowsBatch_(SHEET_NAME.COUPON, [row]);
-    const coupon = mapCouponRow_(row);
+    const couponData = {
+      id: couponId,
+      code: data.code,
+      type: data.type,
+      value: data.value,
+      minOrderValue: data.minOrderValue,
+      maxDiscount: data.maxDiscount,
+      status: data.status,
+      expiresAt: data.expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    firestoreSet_("discounts", couponId, couponData);
+
+    const coupon = mapCouponDoc_(couponData);
     logAction_("CREATE_COUPON", coupon.id, (payload || {}).userRole || "system", coupon);
     pushDeltaSafe_("COUPON", "CREATE", coupon);
     return coupon;
@@ -78,22 +84,24 @@ function createCoupon(payload) {
 
 function updateCoupon(couponId, payload) {
   return withPaymentLock_("coupon_" + couponId, function () {
-    const found = findRowById_(SHEET_NAME.COUPON, couponId);
-    if (!found) throw new Error("COUPON_NOT_FOUND");
+    const existing = firestoreGet_("discounts", couponId);
+    if (!existing) throw new Error("COUPON_NOT_FOUND");
 
-    const row = found.values;
     const data = payload || {};
+    const updates = {};
 
-    if (data.code !== undefined) row[SHEET_SCHEMA.COUPON.CODE] = trimSafe_(data.code).toUpperCase();
-    if (data.type !== undefined) row[SHEET_SCHEMA.COUPON.TYPE] = trimSafe_(data.type).toLowerCase();
-    if (data.value !== undefined) row[SHEET_SCHEMA.COUPON.VALUE] = toNumberSafe_(data.value);
-    if (data.minOrderValue !== undefined) row[SHEET_SCHEMA.COUPON.MIN_ORDER_VALUE] = toNumberSafe_(data.minOrderValue);
-    if (data.maxDiscount !== undefined) row[SHEET_SCHEMA.COUPON.MAX_DISCOUNT] = toNumberSafe_(data.maxDiscount);
-    if (data.status !== undefined) row[SHEET_SCHEMA.COUPON.STATUS] = trimSafe_(data.status).toUpperCase();
-    if (data.expiresAt !== undefined) row[SHEET_SCHEMA.COUPON.EXPIRES_AT] = trimSafe_(data.expiresAt);
+    if (data.code !== undefined) updates.code = trimSafe_(data.code).toUpperCase();
+    if (data.type !== undefined) updates.type = trimSafe_(data.type).toLowerCase();
+    if (data.value !== undefined) updates.value = toNumberSafe_(data.value);
+    if (data.minOrderValue !== undefined) updates.minOrderValue = toNumberSafe_(data.minOrderValue);
+    if (data.maxDiscount !== undefined) updates.maxDiscount = toNumberSafe_(data.maxDiscount);
+    if (data.status !== undefined) updates.status = trimSafe_(data.status).toUpperCase();
+    if (data.expiresAt !== undefined) updates.expiresAt = trimSafe_(data.expiresAt);
+    updates.updatedAt = toIsoString_(new Date());
 
-    batchWriteRows_(SHEET_NAME.COUPON, found.rowIndex, 1, [row]);
-    const coupon = mapCouponRow_(row);
+    const updated = firestoreUpdate_("discounts", couponId, updates);
+
+    const coupon = mapCouponDoc_(updated);
     logAction_("UPDATE_COUPON", coupon.id, data.userRole || "system", coupon);
     pushDeltaSafe_("COUPON", "UPDATE", coupon);
     return coupon;

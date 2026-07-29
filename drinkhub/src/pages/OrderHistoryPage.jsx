@@ -4,6 +4,8 @@ import Header from "../components/Header";
 import { formatCurrency, formatDate } from "../utils/helpers";
 import { printReceipt } from "../utils/receipt";
 import appStore from "../services/AppStore";
+import { orderApi } from "../api/Api";
+import { getStoredAuthUser } from "../utils/auth";
 
 const formatDateTime = (value) => {
   if (!value) return "";
@@ -12,26 +14,21 @@ const formatDateTime = (value) => {
   return date.toLocaleString("vi-VN");
 };
 
-const formatItemTime = (value) => {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
 export default function OrderHistoryPage() {
   const navigate = useNavigate();
+  const currentUser = getStoredAuthUser();
+  const isAdmin = currentUser?.role === "admin";
+
   const [filter, setFilter] = useState({
     staff: "",
     table: "",
     item: "",
     orderCode: "",
+    paymentMethod: "",
   });
   const [storeState, setStoreState] = useState(appStore.getState());
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
 
   const storeInfo = storeState.settings || {};
 
@@ -50,9 +47,10 @@ export default function OrderHistoryPage() {
     return allOrders
       .map((order) => {
         const items = allDetails.filter((d) => d.orderId === order.id);
+        const orderItems = order.items && order.items.length > 0 ? order.items : items;
         return {
           ...order,
-          items,
+          items: orderItems,
         };
       })
       .sort(
@@ -95,6 +93,27 @@ export default function OrderHistoryPage() {
     printReceipt(receiptData, tableData, restaurantData, type);
   };
 
+  const handleDeleteOrder = async (orderId) => {
+    if (!isAdmin) {
+      alert("Chỉ tài khoản Admin/Owner mới có quyền xóa đơn hàng!");
+      return;
+    }
+
+    if (!window.confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN đơn hàng ${orderId}?\n\nLưu ý: Thao tác này không thể hoàn tác và báo cáo doanh thu sẽ được cập nhật tự động.`)) {
+      return;
+    }
+
+    try {
+      setDeletingId(orderId);
+      setError("");
+      await orderApi.deleteOrder(orderId);
+    } catch (err) {
+      setError(err.message || "Xóa đơn hàng thất bại!");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const staffOptions = useMemo(
     () =>
       Array.from(
@@ -119,13 +138,19 @@ export default function OrderHistoryPage() {
           .toLowerCase()
           .includes(itemKeyword),
       );
+    const matchesPayment =
+      !filter.paymentMethod ||
+      (filter.paymentMethod === "transfer"
+        ? order.paymentMethod === "transfer"
+        : order.paymentMethod !== "transfer");
 
     return (
       (!filter.staff || order.createdBy === filter.staff) &&
       (!filter.table || String(order.tableId) === String(filter.table)) &&
       (!orderKeyword ||
         String(order.id).toLowerCase().includes(orderKeyword)) &&
-      hasItem
+      hasItem &&
+      matchesPayment
     );
   });
 
@@ -212,8 +237,38 @@ export default function OrderHistoryPage() {
                 }
               />
             </div>
+
+            <div>
+              <p className="text-sm text-gray-500 mb-1">Thanh toán</p>
+              <div className="flex gap-2">
+                {[
+                  { value: "cash", label: "💵 Tiền mặt" },
+                  { value: "transfer", label: "📱 Chuyển khoản" },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() =>
+                      setFilter({
+                        ...filter,
+                        paymentMethod:
+                          filter.paymentMethod === opt.value ? "" : opt.value,
+                      })
+                    }
+                    className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition ${
+                      filter.paymentMethod === opt.value
+                        ? opt.value === "transfer"
+                          ? "border-violet-500 bg-violet-50 text-violet-700"
+                          : "border-slate-500 bg-slate-50 text-slate-700"
+                        : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
+          {error && <p className="text-sm text-red-600 mt-4 font-bold">{error}</p>}
         </div>
 
         <div className="space-y-4">
@@ -260,6 +315,17 @@ export default function OrderHistoryPage() {
                           ? "Đã thanh toán"
                           : "Chưa thanh toán"}
                       </span>
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                          order.paymentMethod === "transfer"
+                            ? "bg-violet-100 text-violet-700"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {order.paymentMethod === "transfer"
+                          ? "Chuyển khoản"
+                          : "Tiền mặt"}
+                      </span>
                     </div>
                     <p className="text-sm text-gray-500 mt-2 font-medium">
                       Thu ngân:{" "}
@@ -272,19 +338,31 @@ export default function OrderHistoryPage() {
                       </span>
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2.5">
+
+                  <div className="flex flex-wrap gap-2.5 items-center">
                     <button
                       onClick={() => handleReprint(order, "order_slip")}
-                      className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold text-xs px-3.5 py-2 rounded-xl transition"
+                      className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
                     >
                       🖨️ In Phiếu Đặt Đồ
                     </button>
                     <button
                       onClick={() => handleReprint(order, "payment_receipt")}
-                      className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-semibold text-xs px-3.5 py-2 rounded-xl transition"
+                      className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 font-semibold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
                     >
                       🖨️ In Hóa Đơn
                     </button>
+
+                    {/* Nút XÓA ORDER CHỈ HÌNH THÀNH KHI DÙNG VỚI TÀI KHOẢN ADMIN */}
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleDeleteOrder(order.id)}
+                        disabled={deletingId === order.id}
+                        className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer disabled:opacity-50"
+                      >
+                        {deletingId === order.id ? "Đang xóa..." : "🗑️ Xóa Order"}
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -308,9 +386,9 @@ export default function OrderHistoryPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 text-gray-600">
-                        {order.items?.map((item) => (
+                        {order.items?.map((item, idx) => (
                           <tr
-                            key={item.id}
+                            key={item.id || idx}
                             className="hover:bg-gray-100/30 transition"
                           >
                             <td className="px-4 py-3 font-medium text-gray-800">

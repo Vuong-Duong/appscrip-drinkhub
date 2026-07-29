@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import appStore from "../services/AppStore";
 import { formatCurrency, getDirectImageUrl } from "../utils/helpers";
 
@@ -25,19 +31,22 @@ const DEFAULT_SLIDES = [
     name: "Trà Đào Hồng Đài",
     category: "Trà trái cây",
     price: 35000,
-    description: "Trà đào thơm ngát kết hợp cùng miếng đào giòn ngọt và thạch đào thanh mát.",
+    description:
+      "Trà đào thơm ngát kết hợp cùng miếng đào giòn ngọt và thạch đào thanh mát.",
   },
   {
     name: "Cà Phê Muối DrinkHub",
     category: "Cà phê",
     price: 29000,
-    description: "Hương vị cà phê phin đậm đà hòa quyện cùng lớp kem muối béo ngậy mặn nhẹ.",
+    description:
+      "Hương vị cà phê phin đậm đà hòa quyện cùng lớp kem muối béo ngậy mặn nhẹ.",
   },
   {
     name: "Matcha Latte Đá Xay",
     category: "Đá xay",
     price: 45000,
-    description: "Trà xanh Uji Nhật Bản nguyên chất xay mịn với sữa tươi và đá, phủ kem whipping.",
+    description:
+      "Trà xanh Uji Nhật Bản nguyên chất xay mịn với sữa tươi và đá, phủ kem whipping.",
   },
 ];
 
@@ -82,7 +91,7 @@ export default function CustomerDisplayPage() {
       const url = buildQrUrl(
         displayState.settings,
         displayState.total,
-        displayState.orderId
+        displayState.orderId,
       );
 
       // Only preload if URL changed
@@ -96,7 +105,14 @@ export default function CustomerDisplayPage() {
         preloadImgRef.current = img; // keep reference to prevent GC
       }
     }
-  }, [displayState.status, displayState.paymentMethod, displayState.total, displayState.settings, displayState.orderId, buildQrUrl]);
+  }, [
+    displayState.status,
+    displayState.paymentMethod,
+    displayState.total,
+    displayState.settings,
+    displayState.orderId,
+    buildQrUrl,
+  ]);
 
   // Time & Date Clock
   useEffect(() => {
@@ -107,7 +123,7 @@ export default function CustomerDisplayPage() {
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
-        })
+        }),
       );
       setDate(
         now.toLocaleDateString("vi-VN", {
@@ -115,7 +131,7 @@ export default function CustomerDisplayPage() {
           year: "numeric",
           month: "long",
           day: "numeric",
-        })
+        }),
       );
     };
     updateTime();
@@ -138,15 +154,15 @@ export default function CustomerDisplayPage() {
     const products = appStore.get("products") || [];
     if (products.length > 0) {
       // Pick products that have images, or just pick top 5
-      const availableSlides = products
-        .slice(0, 8)
-        .map((p) => ({
-          name: p.name,
-          category: p.category || "Đồ uống",
-          price: p.price,
-          image: p.image ? getDirectImageUrl(p.image) : null,
-          description: p.description || `Thưởng thức ${p.name} thơm ngon mát lạnh tại DrinkHub.`,
-        }));
+      const availableSlides = products.slice(0, 8).map((p) => ({
+        name: p.name,
+        category: p.category || "Đồ uống",
+        price: p.price,
+        image: p.image ? getDirectImageUrl(p.image) : null,
+        description:
+          p.description ||
+          `Thưởng thức ${p.name} thơm ngon mát lạnh tại DrinkHub.`,
+      }));
       setSlides(availableSlides.length > 0 ? availableSlides : DEFAULT_SLIDES);
     }
   }, []);
@@ -192,24 +208,33 @@ export default function CustomerDisplayPage() {
         let bankInfo = null;
 
         if (payload.paymentMethod === "transfer") {
-          const bankId = payload.settings?.BANK_ID || "MB";
-          const accountNo = payload.settings?.BANK_ACCOUNT || "1234567890";
-          const accountName = payload.settings?.BANK_OWNER || "QUYNH ANH";
-          const orderId = payload.orderId || "";
-          const addInfo = `DH ${orderId}`.trim();
+          qrUrl = payload.qrUrl || "";
 
-          qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${payload.total}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(accountName)}`;
+          if (!qrUrl) {
+            const bankId = payload.settings?.BANK_ID || "MB";
+            const accountNo = payload.settings?.BANK_ACCOUNT || "1234567890";
+            const accountName = payload.settings?.BANK_OWNER || "QUYNH ANH";
+            const orderId = payload.orderId || "";
+            const addInfo = `DH ${orderId}`.trim();
+
+            qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${payload.total}&addInfo=${encodeURIComponent(addInfo)}&accountName=${encodeURIComponent(accountName)}`;
+          }
 
           // Use preloaded QR if it matches (instant display!)
-          if (preloadedQrRef.current.url === qrUrl && preloadedQrRef.current.loaded) {
+          if (
+            preloadedQrRef.current.url === qrUrl &&
+            preloadedQrRef.current.loaded
+          ) {
             // QR already cached in browser — will render instantly
           }
-          
+
           bankInfo = {
-            bankId,
-            accountNo,
-            accountName,
-            description: addInfo,
+            bankId: payload.settings?.BANK_ID || "MB",
+            accountNo: payload.settings?.BANK_ACCOUNT || "1234567890",
+            accountName: payload.settings?.BANK_OWNER || "QUYNH ANH",
+            description: payload.orderId
+              ? `DH${String(payload.orderId).replace(/^DH/i, "")}`
+              : "PAYMENT",
           };
         }
 
@@ -427,7 +452,7 @@ export default function CustomerDisplayPage() {
             <h3 className="text-lg font-bold text-slate-300 mb-4 flex items-center gap-2">
               <span>📋</span> Danh sách sản phẩm
             </h3>
-            
+
             <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-800">
               {displayState.items.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-500 font-medium">
@@ -497,15 +522,18 @@ export default function CustomerDisplayPage() {
 
             {/* Total Section */}
             <div className="mt-8 border-t border-white/10 pt-6">
-              <p className="text-slate-400 font-bold mb-2">TỔNG TIỀN CẦN THANH TOÁN</p>
+              <p className="text-slate-400 font-bold mb-2">
+                TỔNG TIỀN CẦN THANH TOÁN
+              </p>
               <p className="text-5xl font-black tracking-tight text-emerald-400 drop-shadow-[0_2px_10px_rgba(52,211,153,0.2)]">
                 {formatCurrency(displayState.total)}
               </p>
-              
+
               <div className="mt-6 p-4 rounded-2xl bg-slate-950 border border-white/5 flex items-center gap-3">
                 <span className="text-2xl animate-pulse">☕</span>
                 <p className="text-xs text-slate-400 font-medium leading-relaxed">
-                  Nhân viên đang chuẩn bị hóa đơn. Quý khách vui lòng kiểm tra kỹ danh sách món đã gọi.
+                  Nhân viên đang chuẩn bị hóa đơn. Quý khách vui lòng kiểm tra
+                  kỹ danh sách món đã gọi.
                 </p>
               </div>
             </div>
@@ -593,34 +621,47 @@ export default function CustomerDisplayPage() {
                     <div className="space-y-4 text-base font-medium">
                       <div className="flex justify-between border-b border-white/5 pb-2.5">
                         <span className="text-slate-400">Ngân hàng:</span>
-                        <span className="text-white font-bold uppercase">{displayState.bankInfo.bankId}</span>
+                        <span className="text-white font-bold uppercase">
+                          {displayState.bankInfo.bankId}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-white/5 pb-2.5">
                         <span className="text-slate-400">Số tài khoản:</span>
-                        <span className="text-white font-bold tracking-wider tabular-nums">{displayState.bankInfo.accountNo}</span>
+                        <span className="text-white font-bold tracking-wider tabular-nums">
+                          {displayState.bankInfo.accountNo}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-white/5 pb-2.5">
                         <span className="text-slate-400">Chủ tài khoản:</span>
-                        <span className="text-white font-bold uppercase">{displayState.bankInfo.accountName}</span>
+                        <span className="text-white font-bold uppercase">
+                          {displayState.bankInfo.accountName}
+                        </span>
                       </div>
                       <div className="flex justify-between border-b border-white/5 pb-2.5">
                         <span className="text-slate-400">Nội dung CK:</span>
-                        <span className="text-yellow-400 font-bold uppercase tracking-wider">{displayState.bankInfo.description}</span>
+                        <span className="text-yellow-400 font-bold uppercase tracking-wider">
+                          {displayState.bankInfo.description}
+                        </span>
                       </div>
                     </div>
                   )}
                 </div>
 
                 <div className="mt-8 border-t border-white/10 pt-6">
-                  <p className="text-slate-400 font-bold mb-1.5">SỐ TIỀN CẦN THANH TOÁN</p>
+                  <p className="text-slate-400 font-bold mb-1.5">
+                    SỐ TIỀN CẦN THANH TOÁN
+                  </p>
                   <p className="text-5xl font-black text-emerald-400 drop-shadow-[0_2px_10px_rgba(52,211,153,0.2)] mb-6">
                     {formatCurrency(displayState.total)}
                   </p>
 
                   <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-950/30 border border-emerald-900/50">
-                    <span className="text-2xl animate-pulse text-emerald-400">🕒</span>
+                    <span className="text-2xl animate-pulse text-emerald-400">
+                      🕒
+                    </span>
                     <p className="text-xs text-slate-300 font-semibold leading-relaxed">
-                      Vui lòng quét mã QR chuyển khoản chính xác số tiền trên. Hệ thống đang chờ xác nhận từ thiết bị bán hàng.
+                      Vui lòng quét mã QR chuyển khoản chính xác số tiền trên.
+                      Hệ thống đang chờ xác nhận từ thiết bị bán hàng.
                     </p>
                   </div>
                 </div>
@@ -632,9 +673,12 @@ export default function CustomerDisplayPage() {
               <div className="w-24 h-24 rounded-full bg-blue-950 border-2 border-blue-500/30 flex items-center justify-center text-5xl mb-6 shadow-lg shadow-blue-500/10">
                 💵
               </div>
-              <h3 className="text-2xl font-black mb-4">Thanh toán bằng tiền mặt</h3>
+              <h3 className="text-2xl font-black mb-4">
+                Thanh toán bằng tiền mặt
+              </h3>
               <p className="text-slate-400 text-lg mb-8 max-w-md font-medium">
-                Vui lòng gửi số tiền mặt tương ứng dưới đây cho nhân viên thu ngân tại quầy order.
+                Vui lòng gửi số tiền mặt tương ứng dưới đây cho nhân viên thu
+                ngân tại quầy order.
               </p>
 
               <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-widest">
@@ -647,7 +691,8 @@ export default function CustomerDisplayPage() {
               <div className="p-4 bg-slate-950 border border-white/5 rounded-2xl flex items-center gap-3 w-full max-w-md text-left">
                 <span className="text-2xl text-blue-400">ℹ️</span>
                 <p className="text-xs text-slate-400 font-medium">
-                  Nhân viên sẽ nhận tiền mặt và hoàn lại tiền thừa cho quý khách nếu có. Cảm ơn quý khách!
+                  Nhân viên sẽ nhận tiền mặt và hoàn lại tiền thừa cho quý khách
+                  nếu có. Cảm ơn quý khách!
                 </p>
               </div>
             </div>
