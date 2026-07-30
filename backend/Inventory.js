@@ -118,6 +118,9 @@ function addInventory(payload) {
         collection: "ingredients",
         id: ingId,
         data: {
+          name: trimSafe_(existing.name),
+          unit: trimSafe_(existing.unit),
+          note: trimSafe_(existing.note),
           quantity: newQty,
           updatedAt: now,
         },
@@ -195,6 +198,9 @@ function stocktakeInventory(payload) {
         collection: "ingredients",
         id: ingId,
         data: {
+          name: trimSafe_(existing.name),
+          unit: trimSafe_(existing.unit),
+          note: trimSafe_(existing.note),
           quantity: actualQty,
           updatedAt: now,
         },

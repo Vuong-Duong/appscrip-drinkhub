@@ -69,6 +69,9 @@ export default function BillSummaryPage() {
           quantity: item.quantity,
           price: item.unitPrice || item.price,
           total: item.subtotal,
+          toppings: item.toppings || [],
+          notes: item.notes || [],
+          customNote: item.customNote || "",
         })),
         subtotal: orderData.subtotal,
         discount: orderData.discount,
@@ -87,9 +90,9 @@ export default function BillSummaryPage() {
         phone: "Số điện thoại",
       };
 
-      printReceipt(receiptData, tableData, restaurantData, "payment_receipt");
+      printReceipt(receiptData, tableData, restaurantData, ["order_slip", "payment_receipt"]);
 
-      console.log("Hóa đơn được gửi đến máy in:", receiptId);
+      console.log("Phiếu đặt đồ & Hóa đơn được gửi đến máy in:", receiptId);
     } catch (err) {
       setError("Lỗi khi in hóa đơn: " + (err.message || err));
     } finally {
@@ -152,6 +155,9 @@ export default function BillSummaryPage() {
             quantity: item.quantity,
             price: item.unitPrice || item.price,
             total: item.subtotal,
+            toppings: item.toppings || [],
+            notes: item.notes || [],
+            customNote: item.customNote || "",
           })),
           subtotal: orderData.subtotal,
           discount: orderData.discount,
@@ -170,36 +176,12 @@ export default function BillSummaryPage() {
           phone: "Số điện thoại",
         };
 
-        printReceipt(receiptData, tableData, restaurantData, "payment_receipt");
+        printReceipt(receiptData, tableData, restaurantData, ["order_slip", "payment_receipt"]);
       } catch (printErr) {
         console.error("Auto print failed:", printErr);
       }
 
-      let finalOrderId = orderId;
-      let finalAmount = amount;
-      const isLocalTempId = String(orderId).startsWith("ord_local_");
-
-      if (!orderData.existingOrderId || isLocalTempId) {
-        const serverOrder = await orderApi.createOrder(orderData);
-        finalOrderId = serverOrder.id;
-        finalAmount = Number(serverOrder.grandTotal) || amount;
-      } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
-        const result = await orderApi.addItems(
-          orderData.existingOrderId,
-          orderData.newCartItems,
-          orderData.discount,
-        );
-        orderData.newCartItems = [];
-        finalAmount = Number(result.grandTotal) || amount;
-      }
-
-      const paymentResult = await paymentApi.processPayment({
-        provider: "manual",
-        orderId: finalOrderId,
-        amount: finalAmount,
-        transactionId: `manual_${finalOrderId}_${Date.now()}`,
-      });
-
+      // Chuyển hướng & cập nhật màn hình phụ ngay lập tức
       CustomerDisplayService.sendCheckout({
         tableName: orderData.tableName,
         items: orderData.items.map((i) => ({
@@ -213,12 +195,45 @@ export default function BillSummaryPage() {
         total: orderData.grandTotal,
         paymentMethod:
           orderData.paymentMethod === "transfer" ? "transfer" : "cash",
-        qrUrl: paymentResult?.qrUrl || paymentResult?.quickLink || "",
-        orderId: finalOrderId,
+        orderId: orderId,
         settings: storeInfo,
       });
       CustomerDisplayService.sendSuccess();
+
       navigate("/khu-vuc", { replace: true });
+
+      // Đồng bộ ngầm lên server (Background Sync)
+      (async () => {
+        try {
+          let finalOrderId = orderId;
+          let finalAmount = amount;
+          const isLocalTempId = String(orderId).startsWith("ord_local_");
+
+          if (!orderData.existingOrderId || isLocalTempId) {
+            const serverOrder = await orderApi.createOrder(orderData);
+            finalOrderId = serverOrder.id;
+            finalAmount = Number(serverOrder.grandTotal) || amount;
+          } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
+            const result = await orderApi.addItems(
+              orderData.existingOrderId,
+              orderData.newCartItems,
+              orderData.discount,
+            );
+            orderData.newCartItems = [];
+            finalAmount = Number(result.grandTotal) || amount;
+          }
+
+          await paymentApi.processPayment({
+            provider: "manual",
+            orderId: finalOrderId,
+            amount: finalAmount,
+            transactionId: `manual_${finalOrderId}_${Date.now()}`,
+          });
+        } catch (syncErr) {
+          console.error("Background payment sync failed:", syncErr);
+          appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
+        }
+      })();
     } catch (err) {
       console.error("Failed to confirm payment:", err);
       setError(err.message || "Lỗi khi xác nhận thanh toán");
@@ -284,22 +299,48 @@ export default function BillSummaryPage() {
             <div className="mb-6">
               <h3 className="text-lg font-bold mb-4">Danh sách sản phẩm</h3>
               <div className="space-y-3">
-                {orderData.items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="flex justify-between items-start bg-gray-50 p-3 rounded-xl"
-                  >
-                    <div className="flex-1">
-                      <p className="font-medium">{item.productName}</p>
-                      <p className="text-sm text-gray-500">
-                        {item.quantity} x {formatCurrency(item.unitPrice)}
-                      </p>
+                {orderData.items.map((item, idx) => {
+                  const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
+                  const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+
+                  return (
+                    <div
+                      key={idx}
+                      className="bg-gray-50 p-3.5 rounded-2xl space-y-1.5 border border-gray-100"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-semibold text-gray-800">{item.productName || item.name}</p>
+                          <p className="text-sm text-gray-500">
+                            {item.quantity} x {formatCurrency(item.unitPrice)}
+                          </p>
+                        </div>
+                        <p className="font-bold text-right min-w-fit ml-4 text-blue-600">
+                          {formatCurrency(item.subtotal)}
+                        </p>
+                      </div>
+
+                      {hasToppings && (
+                        <div className="pl-3 text-xs text-blue-700 space-y-0.5 border-l-2 border-blue-300">
+                          {item.toppings.map((top, tIdx) => (
+                            <div key={tIdx} className="flex justify-between">
+                              <span>+ {top.name || top.productName} (x{top.quantity || 1})</span>
+                              {Number(top.price || 0) > 0 && (
+                                <span className="font-medium">+{formatCurrency(Number(top.price) * (top.quantity || 1))}</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {hasNotes && (
+                        <div className="pl-3 text-xs text-amber-700 italic border-l-2 border-amber-300">
+                          📝 {item.notes?.join(", ")} {item.customNote && `("${item.customNote}")`}
+                        </div>
+                      )}
                     </div>
-                    <p className="font-bold text-right min-w-fit ml-4">
-                      {formatCurrency(item.subtotal)}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

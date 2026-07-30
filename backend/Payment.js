@@ -118,17 +118,9 @@ const isDuplicatePayment_ = (fingerprint, transactionId) => {
     return true;
   }
 
-  const docs = firestoreQuery_("payments");
-
-  for (let i = 0; i < docs.length; i++) {
-    const doc = docs[i];
-    const storedFingerprint = trimSafe_(doc.fingerprint);
-    const storedTransId = trimSafe_(doc.transactionId);
-
-    if (
-      (fingerprint && storedFingerprint === fingerprint) ||
-      (transactionId && storedTransId === transactionId)
-    ) {
+  if (transactionId) {
+    const existing = firestoreGet_("payments", transactionId);
+    if (existing) {
       putPaymentCache_(fingerprint, transactionId);
       return true;
     }

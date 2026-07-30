@@ -349,19 +349,6 @@ const withTransaction_ = (transactionId, callback) =>
 const withStockLock_ = (productId, callback) =>
   withLock_("stock:" + productId, callback);
 
-const getStoreInfo_ = (useCache = true) => {
-  const rows = getSheetData_(SHEET_NAME.STORE_INFO, useCache);
-  const info = {};
-
-  for (let i = 1; i < rows.length; i++) {
-    const key = trimSafe_(rows[i][SHEET_SCHEMA.STORE_INFO.KEY]);
-    if (!key) continue;
-    info[key] = trimSafe_(rows[i][SHEET_SCHEMA.STORE_INFO.VALUE]);
-  }
-
-  return info;
-};
-
 const writeLog_ = (action, target, account, details) => {
   const logId = generateId_("log");
   const timestamp = toIsoString_(new Date());

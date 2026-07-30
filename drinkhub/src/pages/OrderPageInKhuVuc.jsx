@@ -8,6 +8,11 @@ import { printReceipt } from "../utils/receipt";
 import appStore from "../services/AppStore";
 import CrudService from "../services/CrudService";
 import CustomerDisplayService from "../services/CustomerDisplayService";
+import {
+  calculateItemUnitPrice,
+  calculateItemSubtotal,
+  areItemsEqual,
+} from "../utils/orderHelpers";
 
 const normalizeCategoryId = (value) =>
   String(value || "khac")
@@ -54,6 +59,22 @@ export default function OrderPage() {
   const [isConfirmedForDisplay, setIsConfirmedForDisplay] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
 
+  const [toppingModal, setToppingModal] = useState({ isOpen: false, itemIndex: -1 });
+  const [noteModal, setNoteModal] = useState({ isOpen: false, itemIndex: -1, customText: "" });
+
+  const PRESET_NOTES = [
+    "Ít đá",
+    "Không đá",
+    "Nhiều đá",
+    "Ít đường",
+    "Không đường",
+    "50% đường",
+    "70% đường",
+    "Mang đi",
+    "Nóng",
+    "Uống tại chỗ",
+  ];
+
   const showToast = (message, type = "success") => {
     setToast({ isOpen: true, message, type });
     setTimeout(() => {
@@ -94,6 +115,15 @@ export default function OrderPage() {
     };
   }, []);
 
+  // Redirect to shift page if no open shift exists
+  useEffect(() => {
+    const shifts = Array.isArray(storeState.shifts) ? storeState.shifts : [];
+    const hasOpenShift = shifts.some((s) => s.status === "open");
+    if (!hasOpenShift && !storeState.loading) {
+      navigate("/shift", { replace: true });
+    }
+  }, [storeState.shifts, storeState.loading, navigate]);
+
   const selectedTable = tables.find(
     (table) => String(table.id) === String(decodedTableId),
   );
@@ -120,10 +150,19 @@ export default function OrderPage() {
 
   const hasExistingOrder = Boolean(existingOrder);
 
+  const toppingProducts = useMemo(() => {
+    return products.filter(
+      (p) =>
+        String(p.category || "").trim().toLowerCase() === "topping" &&
+        p.status !== "DELETED",
+    );
+  }, [products]);
+
   const categories = useMemo(() => {
     const categoryMap = new Map();
     products.forEach((product) => {
-      const label = product.category || "Khác";
+      const label = (product.category || "Khác").trim();
+      if (label.toLowerCase() === "topping") return; // Ẩn danh mục Topping khỏi danh mục chính
       const id = normalizeCategoryId(label);
       if (!categoryMap.has(id)) {
         categoryMap.set(id, { id, label });
@@ -133,8 +172,9 @@ export default function OrderPage() {
   }, [products]);
 
   const currentItems = products.filter((product) => {
-    const sameCategory =
-      normalizeCategoryId(product.category) === activeCategory;
+    const cat = String(product.category || "").trim();
+    if (cat.toLowerCase() === "topping") return false; // Ẩn sản phẩm Topping khỏi danh sách món chính
+    const sameCategory = normalizeCategoryId(cat) === activeCategory;
     const matchesSearch = String(product.name || "")
       .toLowerCase()
       .includes(search.trim().toLowerCase());
@@ -142,55 +182,77 @@ export default function OrderPage() {
   });
 
   const addToCart = (product) => {
+    const newItemCandidate = {
+      cartItemId: `citem_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: product.id,
+      productId: product.id,
+      name: product.name,
+      price: Number(product.price || 0),
+      unitPrice: Number(product.price || 0),
+      quantity: 1,
+      size: "",
+      sugar: "",
+      ice: "",
+      toppings: [],
+      notes: [],
+      customNote: "",
+      stock: product.stock,
+    };
+
     setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
-      const currentQty = existing ? existing.quantity : 0;
-      if (currentQty + 1 > product.stock) {
-        setError(
-          `Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`,
-        );
+      const totalSameProductQty = prev
+        .filter((item) => String(item.id || item.productId) === String(product.id))
+        .reduce((sum, i) => sum + i.quantity, 0);
+
+      if (totalSameProductQty + 1 > product.stock) {
+        setError(`Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`);
         return prev;
       }
       setError("");
-      if (existing) {
-        return prev.map((item) =>
-          item.id === product.id
+
+      const existingIndex = prev.findIndex((item) => areItemsEqual(item, newItemCandidate));
+      if (existingIndex !== -1) {
+        return prev.map((item, idx) =>
+          idx === existingIndex
             ? { ...item, quantity: item.quantity + 1 }
             : item,
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, newItemCandidate];
     });
   };
 
-  const updateQuantity = (productId, delta) => {
-    const product = products.find((p) => p.id === productId);
-    if (!product) return;
-
+  const updateQuantityByIndex = (itemIndex, delta) => {
     setCart((prev) => {
-      const existing = prev.find((item) => item.id === productId);
-      if (!existing) return prev;
-      const newQty = existing.quantity + delta;
-      if (newQty > product.stock) {
-        setError(
-          `Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`,
-        );
-        return prev;
+      const item = prev[itemIndex];
+      if (!item) return prev;
+
+      const product = products.find((p) => String(p.id) === String(item.id || item.productId));
+      const newQty = item.quantity + delta;
+
+      if (delta > 0 && product) {
+        const totalSameProductQty = prev
+          .filter((i) => String(i.id || i.productId) === String(product.id))
+          .reduce((sum, i) => sum + i.quantity, 0);
+
+        if (totalSameProductQty + delta > product.stock) {
+          setError(`Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`);
+          return prev;
+        }
       }
       setError("");
-      return prev
-        .map((item) =>
-          item.id === productId
-            ? { ...item, quantity: Math.max(0, newQty) }
-            : item,
-        )
-        .filter((item) => item.quantity > 0);
+
+      if (newQty <= 0) {
+        return prev.filter((_, idx) => idx !== itemIndex);
+      }
+
+      return prev.map((i, idx) => (idx === itemIndex ? { ...i, quantity: newQty } : i));
     });
   };
 
-  // Subtotal for NEW items in cart
+  // Subtotal for NEW items in cart (bao gồm giá Toppings)
   const cartSubtotal = cart.reduce(
-    (sum, item) => sum + Number(item.price || 0) * item.quantity,
+    (sum, item) => sum + calculateItemSubtotal(item),
     0,
   );
 
@@ -287,6 +349,27 @@ export default function OrderPage() {
     }
   }, [subtotal, appliedDiscountCode, existingOrder]);
 
+  const mapCartItemToOrderItem = (item) => {
+    const itemUnitPrice = calculateItemUnitPrice(item);
+    const itemSubtotal = calculateItemSubtotal(item);
+    return {
+      productId: item.id || item.productId,
+      productName: item.name || item.productName,
+      name: item.name || item.productName,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice || item.price,
+      price: item.unitPrice || item.price,
+      subtotal: itemSubtotal,
+      total: itemSubtotal,
+      size: item.size || "",
+      sugar: item.sugar || "",
+      ice: item.ice || "",
+      toppings: item.toppings || [],
+      notes: item.notes || [],
+      customNote: item.customNote || "",
+    };
+  };
+
   // --- Confirm order and send to Customer Display ---
   const handleConfirmOrder = () => {
     if (!selectedTable) return;
@@ -298,16 +381,13 @@ export default function OrderPage() {
           quantity: item.quantity,
           price: Number(item.unitPrice || 0),
           total: Number(item.subtotal || 0),
+          toppings: item.toppings || [],
+          notes: item.notes || [],
+          customNote: item.customNote || "",
         }))
       : [];
 
-    const newItems = cart.map((item) => ({
-      name: item.name,
-      quantity: item.quantity,
-      price: Number(item.price || 0),
-      total: Number(item.price || 0) * item.quantity,
-    }));
-
+    const newItems = cart.map(mapCartItemToOrderItem);
     const allItems = [...existingItems, ...newItems];
     const orderId = existingOrder ? existingOrder.id : `temp_${Date.now()}`;
 
@@ -339,17 +419,13 @@ export default function OrderPage() {
           quantity: item.quantity,
           unitPrice: Number(item.unitPrice || 0),
           subtotal: Number(item.subtotal || 0),
+          toppings: item.toppings || [],
+          notes: item.notes || [],
+          customNote: item.customNote || "",
         }))
       : [];
 
-    const newItems = cart.map((item) => ({
-      productId: item.id,
-      productName: item.name,
-      quantity: item.quantity,
-      unitPrice: Number(item.price || 0),
-      subtotal: Number(item.price || 0) * item.quantity,
-    }));
-
+    const newItems = cart.map(mapCartItemToOrderItem);
     const allItems = [...existingItems, ...newItems];
 
     const orderData = {
@@ -375,12 +451,7 @@ export default function OrderPage() {
     try {
       const receiptData = {
         id: isNewOrder ? orderId : `${orderId} (Gọi thêm)`,
-        items: cart.map((item) => ({
-          name: item.name,
-          quantity: item.quantity,
-          price: Number(item.price || 0),
-          total: Number(item.price || 0) * item.quantity,
-        })),
+        items: cart.map(mapCartItemToOrderItem),
         subtotal: cartSubtotal,
         discount: isNewOrder ? safeDiscount : 0,
         tax: 0,
@@ -419,13 +490,7 @@ export default function OrderPage() {
       const orderPayload = {
         tableId: decodedTableId,
         customerName: customer.name || "Khách lẻ",
-        items: cart.map((item) => ({
-          productId: item.id,
-          productName: item.name,
-          quantity: item.quantity,
-          unitPrice: Number(item.price || 0),
-          subtotal: Number(item.price || 0) * item.quantity,
-        })),
+        items: cart.map(mapCartItemToOrderItem),
         subtotal: cartSubtotal,
         discount: safeDiscount,
         grandTotal: cartSubtotal - safeDiscount,
@@ -549,13 +614,7 @@ export default function OrderPage() {
 
     try {
       const orderId = existingOrder.id;
-      const newItems = cart.map((item) => ({
-        productId: item.id,
-        productName: item.name,
-        quantity: item.quantity,
-        unitPrice: Number(item.price || 0),
-        subtotal: Number(item.price || 0) * item.quantity,
-      }));
+      const newItems = cart.map(mapCartItemToOrderItem);
 
       // 1. Instantly update AppStore
       const tempDetails = newItems.map((item) => ({
@@ -572,15 +631,22 @@ export default function OrderPage() {
       appStore.set("orderDetails", [...currentDetails, ...tempDetails]);
 
       const currentOrders = appStore.get("orders") || [];
+      const targetOrder = currentOrders.find((o) => o.id === orderId);
+      const existingOrderItems = Array.isArray(targetOrder?.items)
+        ? targetOrder.items
+        : [];
+      const updatedOrderItems = [...existingOrderItems, ...newItems];
+
       appStore.set(
         "orders",
         currentOrders.map((o) =>
           o.id === orderId
             ? {
                 ...o,
-                subtotal: o.subtotal + cartSubtotal,
+                items: updatedOrderItems,
+                subtotal: (Number(o.subtotal) || 0) + cartSubtotal,
                 discount: safeDiscount,
-                grandTotal: o.subtotal + cartSubtotal - safeDiscount,
+                grandTotal: (Number(o.subtotal) || 0) + cartSubtotal - safeDiscount,
               }
             : o,
         ),
@@ -638,6 +704,7 @@ export default function OrderPage() {
 
       setCart([]);
       setError("");
+      navigate("/khu-vuc", { replace: true });
     } catch (err) {
       setError(err.message || "Gọi thêm món thất bại");
     } finally {
@@ -934,29 +1001,50 @@ export default function OrderPage() {
                 <p className="text-sm font-semibold text-gray-600 mb-3">
                   📋 Đã order trước đó
                 </p>
-                {existingOrder.items.map((item, idx) => (
-                  <div
-                    key={`existing-${idx}`}
-                    className="flex items-center justify-between py-2 text-sm text-gray-600"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p>{item.productName}</p>
-                      <p className="text-xs text-gray-400">x{item.quantity}</p>
+                {existingOrder.items.map((item, idx) => {
+                  const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
+                  const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+
+                  return (
+                    <div
+                      key={`existing-${idx}`}
+                      className="py-2 border-b border-gray-100 text-sm text-gray-600 space-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-800">{item.productName || item.name}</p>
+                          <p className="text-xs text-gray-400">x{item.quantity}</p>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <p className="font-semibold">{formatCurrency(Number(item.subtotal || 0))}</p>
+                          <button
+                            onClick={() =>
+                              setConfirmDeleteItem({ isOpen: true, item })
+                            }
+                            className="w-6 h-6 rounded-full bg-red-100 text-red-500 hover:bg-red-200 flex items-center justify-center text-xs font-bold transition"
+                            title="Xóa món"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+
+                      {hasToppings && (
+                        <div className="pl-3 text-xs text-blue-700 space-y-0.5">
+                          {item.toppings.map((t, i) => (
+                            <div key={i}>+ {t.name || t.productName} (x{t.quantity || 1})</div>
+                          ))}
+                        </div>
+                      )}
+
+                      {hasNotes && (
+                        <div className="pl-3 text-xs text-amber-700 italic">
+                          📝 {item.notes?.join(", ")} {item.customNote && `("${item.customNote}")`}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <p>{formatCurrency(Number(item.subtotal || 0))}</p>
-                      <button
-                        onClick={() =>
-                          setConfirmDeleteItem({ isOpen: true, item })
-                        }
-                        className="w-7 h-7 rounded-full bg-red-100 text-red-500 hover:bg-red-200 flex items-center justify-center text-sm font-bold transition"
-                        title="Xóa món"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <div className="flex justify-between pt-2 border-t mt-2 text-sm font-medium">
                   <span>Tạm tính (cũ)</span>
                   <span>{formatCurrency(existingSubtotal)}</span>
@@ -979,36 +1067,93 @@ export default function OrderPage() {
                       ➕ Món mới thêm
                     </p>
                   )}
-                  {cart.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex justify-between py-4 border-b gap-4"
-                    >
-                      <div>
-                        <p className="font-medium">{item.name}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            onClick={() => updateQuantity(item.id, -1)}
-                            className="w-8 h-8 rounded-full bg-gray-100"
-                          >
-                            -
-                          </button>
-                          <span className="font-medium">{item.quantity}</span>
-                          <button
-                            onClick={() => updateQuantity(item.id, 1)}
-                            className="w-8 h-8 rounded-full bg-gray-100"
-                          >
-                            +
-                          </button>
+                  {cart.map((item, idx) => {
+                    const itemUnitPrice = calculateItemUnitPrice(item);
+                    const itemSubtotal = calculateItemSubtotal(item);
+                    const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
+                    const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+
+                    return (
+                      <div
+                        key={item.cartItemId || `cart-item-${idx}`}
+                        className="py-3 border-b border-gray-100 flex flex-col gap-2"
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-gray-800 text-sm">{item.name}</p>
+                            <p className="text-xs text-gray-500">
+                              Đơn giá: {formatCurrency(itemUnitPrice)}
+                            </p>
+                          </div>
+                          <p className="font-bold text-sm text-blue-600 shrink-0">
+                            {formatCurrency(itemSubtotal)}
+                          </p>
+                        </div>
+
+                        {/* Danh sách Topping đã chọn */}
+                        {hasToppings && (
+                          <div className="bg-blue-50/70 rounded-xl p-2 text-xs space-y-1">
+                            <p className="font-semibold text-blue-800 text-[11px]">Topping:</p>
+                            {item.toppings.map((top) => (
+                              <div key={top.id} className="flex justify-between items-center text-blue-700">
+                                <span>+ {top.name} (x{top.quantity || 1})</span>
+                                <span className="font-medium">+{formatCurrency(Number(top.price || 0) * (top.quantity || 1))}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Ghi chú đã chọn */}
+                        {hasNotes && (
+                          <div className="bg-amber-50/70 rounded-xl p-2 text-xs text-amber-800 italic">
+                            {item.notes?.length > 0 && <span>📝 {item.notes.join(", ")}</span>}
+                            {item.notes?.length > 0 && item.customNote && <span> | </span>}
+                            {item.customNote && <span>Ghi chú: "{item.customNote}"</span>}
+                          </div>
+                        )}
+
+                        {/* Nút bấm điều khiển & Thêm Topping/Note */}
+                        <div className="flex items-center justify-between pt-1">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setToppingModal({ isOpen: true, itemIndex: idx })}
+                              className="px-2.5 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg text-xs font-semibold transition"
+                            >
+                              + Topping
+                            </button>
+                            <button
+                              onClick={() =>
+                                setNoteModal({
+                                  isOpen: true,
+                                  itemIndex: idx,
+                                  customText: item.customNote || "",
+                                })
+                              }
+                              className="px-2.5 py-1 bg-amber-100 text-amber-800 hover:bg-amber-200 rounded-lg text-xs font-semibold transition"
+                            >
+                              📝 Ghi chú
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => updateQuantityByIndex(idx, -1)}
+                              className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 font-bold text-gray-700 flex items-center justify-center"
+                            >
+                              -
+                            </button>
+                            <span className="font-bold text-sm min-w-[1rem] text-center">{item.quantity}</span>
+                            <button
+                              onClick={() => updateQuantityByIndex(idx, 1)}
+                              className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 font-bold text-gray-700 flex items-center justify-center"
+                            >
+                              +
+                            </button>
+                          </div>
                         </div>
                       </div>
-                      <p className="font-medium">
-                        {formatCurrency(
-                          Number(item.price || 0) * item.quantity,
-                        )}
-                      </p>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </>
               )}
             </div>
@@ -1560,6 +1705,193 @@ export default function OrderPage() {
           >
             <span>{toast.type === "error" ? "❌" : "✅"}</span>
             <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Popup Thêm Topping */}
+      {toppingModal.isOpen && toppingModal.itemIndex >= 0 && cart[toppingModal.itemIndex] && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between pb-4 border-b">
+              <div>
+                <h3 className="font-bold text-lg text-gray-800">
+                  Thêm Topping cho: {cart[toppingModal.itemIndex]?.name}
+                </h3>
+                <p className="text-xs text-gray-500">Chọn các topping đi kèm món ăn</p>
+              </div>
+              <button
+                onClick={() => setToppingModal({ isOpen: false, itemIndex: -1 })}
+                className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-3">
+              {toppingProducts.length === 0 ? (
+                <p className="text-center text-gray-400 py-8">Chưa có sản phẩm thuộc danh mục Topping</p>
+              ) : (
+                toppingProducts.map((topProduct) => {
+                  const currentItemToppings = cart[toppingModal.itemIndex]?.toppings || [];
+                  const existingTop = currentItemToppings.find((t) => String(t.id) === String(topProduct.id));
+                  const topQty = existingTop ? existingTop.quantity : 0;
+
+                  const handleUpdateToppingQty = (delta) => {
+                    const newQty = topQty + delta;
+                    setCart((prev) => {
+                      const targetItem = prev[toppingModal.itemIndex];
+                      if (!targetItem) return prev;
+                      let updatedToppings = [...(targetItem.toppings || [])];
+                      if (newQty <= 0) {
+                        updatedToppings = updatedToppings.filter((t) => String(t.id) !== String(topProduct.id));
+                      } else if (existingTop) {
+                        updatedToppings = updatedToppings.map((t) =>
+                          String(t.id) === String(topProduct.id) ? { ...t, quantity: newQty } : t
+                        );
+                      } else {
+                        updatedToppings.push({
+                          id: topProduct.id,
+                          name: topProduct.name,
+                          price: Number(topProduct.price || 0),
+                          quantity: 1,
+                        });
+                      }
+                      return prev.map((item, idx) =>
+                        idx === toppingModal.itemIndex ? { ...item, toppings: updatedToppings } : item
+                      );
+                    });
+                  };
+
+                  return (
+                    <div
+                      key={topProduct.id}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-blue-50/50 transition"
+                    >
+                      <div>
+                        <p className="font-semibold text-gray-800 text-sm">{topProduct.name}</p>
+                        <p className="text-xs text-blue-600 font-bold">+{formatCurrency(topProduct.price)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {topQty > 0 && (
+                          <button
+                            onClick={() => handleUpdateToppingQty(-1)}
+                            className="w-7 h-7 rounded-full bg-white border border-gray-300 font-bold text-gray-700 hover:bg-gray-100"
+                          >
+                            -
+                          </button>
+                        )}
+                        {topQty > 0 && <span className="font-bold text-sm min-w-[1.25rem] text-center">{topQty}</span>}
+                        <button
+                          onClick={() => handleUpdateToppingQty(1)}
+                          className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-4 border-t flex justify-end">
+              <button
+                onClick={() => setToppingModal({ isOpen: false, itemIndex: -1 })}
+                className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-2xl hover:bg-blue-700 transition"
+              >
+                Hoàn tất
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup Ghi Chú (Note) */}
+      {noteModal.isOpen && noteModal.itemIndex >= 0 && cart[noteModal.itemIndex] && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between pb-4 border-b">
+              <div>
+                <h3 className="font-bold text-lg text-gray-800">
+                  Ghi chú cho: {cart[noteModal.itemIndex]?.name}
+                </h3>
+                <p className="text-xs text-gray-500">Chọn ghi chú nhanh hoặc nhập ghi chú tùy chỉnh</p>
+              </div>
+              <button
+                onClick={() => setNoteModal({ isOpen: false, itemIndex: -1, customText: "" })}
+                className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-4">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-2">Ghi chú có sẵn:</p>
+                <div className="flex flex-wrap gap-2">
+                  {PRESET_NOTES.map((preset) => {
+                    const currentNotes = cart[noteModal.itemIndex]?.notes || [];
+                    const isSelected = currentNotes.includes(preset);
+
+                    const toggleNote = () => {
+                      setCart((prev) => {
+                        const item = prev[noteModal.itemIndex];
+                        if (!item) return prev;
+                        const nextNotes = isSelected
+                          ? (item.notes || []).filter((n) => n !== preset)
+                          : [...(item.notes || []), preset];
+                        return prev.map((i, idx) =>
+                          idx === noteModal.itemIndex ? { ...i, notes: nextNotes } : i
+                        );
+                      });
+                    };
+
+                    return (
+                      <button
+                        key={preset}
+                        onClick={toggleNote}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                          isSelected
+                            ? "bg-amber-500 text-white shadow-sm"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-gray-500 mb-2">Ghi chú riêng:</p>
+                <input
+                  type="text"
+                  value={noteModal.customText}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNoteModal((prev) => ({ ...prev, customText: val }));
+                    setCart((prev) =>
+                      prev.map((i, idx) =>
+                        idx === noteModal.itemIndex ? { ...i, customNote: val } : i
+                      )
+                    );
+                  }}
+                  placeholder="Ví dụ: Ít sữa, không lấy ống hút..."
+                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:border-amber-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 border-t flex justify-end">
+              <button
+                onClick={() => setNoteModal({ isOpen: false, itemIndex: -1, customText: "" })}
+                className="px-6 py-2.5 bg-amber-500 text-white font-semibold rounded-2xl hover:bg-amber-600 transition"
+              >
+                Lưu ghi chú
+              </button>
+            </div>
           </div>
         </div>
       )}

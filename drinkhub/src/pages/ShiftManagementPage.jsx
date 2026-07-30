@@ -5,6 +5,7 @@ import Footer from "../components/Footer";
 import CrudService from "../services/CrudService";
 import appStore from "../services/AppStore";
 import { formatCurrency } from "../utils/helpers";
+import { shiftApi } from "../api/Api";
 
 export default function ShiftManagementPage() {
   const navigate = useNavigate();
@@ -16,7 +17,17 @@ export default function ShiftManagementPage() {
   const [openingCash, setOpeningCash] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const fetchShifts = async () => {
+    try {
+      setError("");
+      await shiftApi.getShifts();
+    } catch (err) {
+      setError(err.message || "Không thể tải danh sách ca");
+    }
+  };
+
   useEffect(() => {
+    fetchShifts();
     const unsubscribe = appStore.subscribe((state) => {
       setStoreState({ ...state });
     });
@@ -32,8 +43,13 @@ export default function ShiftManagementPage() {
       openingCash !== undefined && openingCash !== null ? openingCash : "",
     ).trim();
 
+    if (openShifts.length > 0) {
+      setError("Đã có ca đang mở! Vui lòng đóng ca hiện tại trước khi mở ca mới.");
+      return;
+    }
+
     if (!trimmedStaffName) {
-      setError("Vui lòng nhập tên nhân viên");
+      setError("Vui lòng nhập tên nhân viên!");
       return;
     }
     if (
@@ -41,7 +57,7 @@ export default function ShiftManagementPage() {
       isNaN(Number(openingCashStr)) ||
       Number(openingCashStr) < 0
     ) {
-      setError("Vui lòng nhập tiền mở ca hợp lệ (số không âm)");
+      setError("Vui lòng nhập tiền thực tế đầu ca hợp lệ (số không âm)!");
       return;
     }
 
@@ -49,17 +65,10 @@ export default function ShiftManagementPage() {
     setError("");
 
     try {
-      const newShift = {
-        id: `shift_${Date.now()}`,
+      await shiftApi.createShift({
         staffName: trimmedStaffName,
-        openingCash: parseInt(openingCashStr, 10) || 0,
-        totalRevenue: 0,
-        status: "open",
-        startTime: new Date().toISOString(),
-        endTime: null,
-      };
-
-      await CrudService.create("shifts", newShift);
+        actualOpeningCash: parseFloat(openingCashStr) || 0,
+      });
 
       setStaffName("");
       setOpeningCash("");
@@ -72,9 +81,19 @@ export default function ShiftManagementPage() {
     }
   };
 
+  const [filterDate, setFilterDate] = useState("");
+
   const openShifts = shifts.filter((s) => s.status === "open");
   const closedShifts = shifts.filter((s) => s.status === "closed");
-  const displayShifts = activeTab === "open" ? openShifts : closedShifts;
+
+  const filteredClosedShifts = closedShifts.filter((s) => {
+    if (!filterDate) return true;
+    const shiftStartDate = s.startTime ? new Date(s.startTime).toISOString().slice(0, 10) : "";
+    const shiftEndDate = s.endTime ? new Date(s.endTime).toISOString().slice(0, 10) : "";
+    return shiftStartDate === filterDate || shiftEndDate === filterDate;
+  });
+
+  const displayShifts = activeTab === "open" ? openShifts : filteredClosedShifts;
 
   const getStatusBadge = (status) => {
     if (status === "open") {
@@ -158,6 +177,33 @@ export default function ShiftManagementPage() {
             Đã đóng ({closedShifts.length})
           </button>
         </div>
+
+        {/* Bộ lọc ngày tháng năm cho ca đã đóng */}
+        {activeTab === "closed" && (
+          <div className="mb-6 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-gray-700">📅 Lọc theo ngày:</span>
+              <input
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm font-medium outline-none focus:border-blue-500"
+              />
+              {filterDate && (
+                <button
+                  onClick={() => setFilterDate("")}
+                  className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-xl transition"
+                >
+                  Tất cả ngày ✕
+                </button>
+              )}
+            </div>
+
+            <div className="text-sm text-gray-500">
+              Hiển thị <span className="font-bold text-gray-900">{filteredClosedShifts.length}</span> ca đã đóng
+            </div>
+          </div>
+        )}
 
         {/* Shifts List */}
         {isLoading ? (

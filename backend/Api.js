@@ -390,12 +390,21 @@ const handleDeleteOrder_ = withTryCatch_((payload, context) => {
   return ok_(deleteOrder(payload?.orderId, userRole));
 });
 
+const handleRunMigration_ = withTryCatch_((payload, context) => {
+  const userRole = context?.user?.role || payload?.userRole;
+  if (!userRole || userRole.toLowerCase() !== "admin") {
+    throw new Error("PERMISSION_DENIED: Chỉ Admin mới có quyền chạy Migration");
+  }
+  return ok_(runMigrationFromSheetsToFirestore());
+});
+
 // =========================
 // ACTION HANDLERS REGISTRY
 // =========================
 const ACTION_HANDLERS = Object.freeze({
   CREATE_ORDER: handleCreateOrder_,
   DELETE_ORDER: handleDeleteOrder_,
+  RUN_MIGRATION: handleRunMigration_,
   PAYMENT: handlePayment_,
   PAYMENT_ANDROID: handlePaymentAndroid_,
   GET_DELTA: handleGetDelta_,

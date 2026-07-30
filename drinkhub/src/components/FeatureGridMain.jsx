@@ -15,7 +15,7 @@ const features = [
   { num: "10", title: "Nhật ký Order", icon: "📋", route: "/order-history" },
   { num: "11", title: "Xuất mã vạch", icon: "🏷️", route: "/feature/14" },
   { num: "12", title: "Quản lý thiết bị", icon: "📟", route: "/device-status" },
-  { num: "13", title: "Kho nguyên liệu", icon: "📦", route: "/inventory" },
+  // { num: "13", title: "Kho nguyên liệu", icon: "📦", route: "/inventory" },
   { num: "14", title: "Đối chiếu két tiền", icon: "🔍", route: "/shift-reconciliation" },
 ];
 

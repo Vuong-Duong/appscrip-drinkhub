@@ -157,11 +157,15 @@ export default function InventoryPage() {
     const qty = parseFloat(newIngredient.quantity) || 0;
 
     if (!name) {
-      setAddError("Tên nguyên liệu không được để trống");
+      setAddError("Tên nguyên liệu không được để trống!");
       return;
     }
     if (!unit) {
-      setAddError("Đơn vị tính không được để trống");
+      setAddError("Đơn vị tính không được để trống!");
+      return;
+    }
+    if (isNaN(qty) || qty < 0) {
+      setAddError("Số lượng ban đầu phải là số không âm!");
       return;
     }
 

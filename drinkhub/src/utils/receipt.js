@@ -36,36 +36,61 @@ export const printReceipt = (order, table, restaurant, type = "payment_receipt")
   }, 500);
 };
 
-// Generates HTML for receipt matching the images
-function generateReceiptHTML(order, table, restaurant, type) {
+// Helper render Topping và Note cho receipt
+const getItemDetailsHTML = (item, isSlip = false) => {
+  let html = "";
+  if (Array.isArray(item.toppings) && item.toppings.length > 0) {
+    const toppingsText = item.toppings
+      .map(
+        (t) =>
+          `+ ${t.name || t.productName} (x${t.quantity || 1})${!isSlip && Number(t.price || 0) > 0 ? ` (+${Number(t.price).toLocaleString()}đ)` : ""}`,
+      )
+      .join("<br/>");
+    html += `<div style="font-size: 11px; color: #444; padding-left: 8px; margin-top: 2px;">${toppingsText}</div>`;
+  }
+
+  const notesList = Array.isArray(item.notes) ? item.notes : [];
+  const customNoteStr = (item.customNote || "").trim();
+  const allNotes = [...notesList];
+  if (customNoteStr) allNotes.push(customNoteStr);
+
+  if (allNotes.length > 0) {
+    html += `<div style="font-size: 11px; font-style: italic; color: #d97706; padding-left: 8px; margin-top: 2px;">📝 ${allNotes.join(", ")}</div>`;
+  }
+
+  return html;
+};
+
+// Generates HTML for single receipt body
+function generateSingleReceiptBodyHTML(order, table, restaurant, singleType) {
   const storeName = restaurant?.name || "Longka Cafe";
   const storeAddress = restaurant?.address || "Địa chỉ cửa hàng";
   const storePhone = restaurant?.phone || "Số điện thoại";
-  
+
   const createdBy = order.createdBy || "Staff";
   const formattedTime = formatTimeVN(order.createdAt);
   const formattedDateText = formatDateVNText(order.createdAt);
   const formattedDate = formatDateVN(order.createdAt);
-  
+
   const tableNumOnly = (table?.number || "").replace(/bàn/gi, "").trim() || "N/A";
   const totalQty = (order.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0);
-  
-  // Calculate sequence number (from order timestamp or ID numeric parts)
+
   const seq = order.id ? parseInt(order.id.replace(/\D/g, "").slice(-2)) || 11 : 11;
 
-  let bodyHTML = "";
-
-  if (type === "order_slip") {
-    // === PHIẾU ĐẶT ĐỒ (Image 1) ===
+  if (singleType === "order_slip") {
+    // === PHIẾU ĐẶT ĐỒ (Bếp / Pha chế) ===
     const itemsRows = (order.items || []).map(item => `
       <tr>
-        <td style="border: 1px solid #000; text-align: left; padding: 6px 8px;">${item.name || item.productName}</td>
-        <td style="border: 1px solid #000; text-align: center; padding: 6px 4px; font-weight: bold;">${item.quantity}</td>
-        <td style="border: 1px solid #000; text-align: center; padding: 6px 4px;">MON</td>
+        <td style="border: 1px solid #000; text-align: left; padding: 6px 8px;">
+          <div style="font-weight: bold;">${item.name || item.productName}</div>
+          ${getItemDetailsHTML(item, true)}
+        </td>
+        <td style="border: 1px solid #000; text-align: center; padding: 6px 4px; font-weight: bold; vertical-align: top;">${item.quantity}</td>
+        <td style="border: 1px solid #000; text-align: center; padding: 6px 4px; vertical-align: top;">MON</td>
       </tr>
     `).join("");
 
-    bodyHTML = `
+    return `
       <div class="receipt-title">PHIẾU ĐẶT ĐỒ</div>
       <div class="receipt-subtitle">${tableNumOnly} - BÀN - HĐ.${order.id || "N/A"}</div>
       
@@ -96,16 +121,19 @@ function generateReceiptHTML(order, table, restaurant, type) {
       </table>
     `;
   } else {
-    // === HÓA ĐƠN THANH TOÁN (Image 2) ===
+    // === HÓA ĐƠN THANH TOÁN ===
     const shortId = order.id ? order.id.slice(-5).toUpperCase() : "N/A";
     
     const itemsRows = (order.items || []).map((item, idx) => `
       <tr>
-        <td style="padding: 6px 0; text-align: center;">${idx + 1}</td>
-        <td style="padding: 6px 0; text-align: left;">${item.name || item.productName}</td>
-        <td style="padding: 6px 0; text-align: center; font-weight: bold;">${item.quantity}</td>
-        <td style="padding: 6px 0; text-align: right;">${Number(item.price || item.unitPrice || 0).toLocaleString()}</td>
-        <td style="padding: 6px 0; text-align: right; font-weight: bold;">${Number(item.total || item.subtotal || 0).toLocaleString()}</td>
+        <td style="padding: 6px 0; text-align: center; vertical-align: top;">${idx + 1}</td>
+        <td style="padding: 6px 0; text-align: left;">
+          <div style="font-weight: bold;">${item.name || item.productName}</div>
+          ${getItemDetailsHTML(item, false)}
+        </td>
+        <td style="padding: 6px 0; text-align: center; font-weight: bold; vertical-align: top;">${item.quantity}</td>
+        <td style="padding: 6px 0; text-align: right; vertical-align: top;">${Number(item.price || item.unitPrice || 0).toLocaleString()}</td>
+        <td style="padding: 6px 0; text-align: right; font-weight: bold; vertical-align: top;">${Number(item.total || item.subtotal || 0).toLocaleString()}</td>
       </tr>
     `).join("");
 
@@ -114,7 +142,7 @@ function generateReceiptHTML(order, table, restaurant, type) {
     const discountVal = order.discount || 0;
     const totalVal = order.total !== undefined ? order.total : (order.grandTotal || 0);
 
-    bodyHTML = `
+    return `
       <div class="receipt-title">HÓA ĐƠN THANH TOÁN</div>
       <div class="receipt-subtitle" style="font-size: 14px; font-weight: bold; margin-bottom: 15px;">SỐ HĐ: ${order.id || "N/A"}</div>
       
@@ -176,6 +204,26 @@ function generateReceiptHTML(order, table, restaurant, type) {
       </div>
     `;
   }
+}
+
+// Generates HTML for receipt matching the images
+function generateReceiptHTML(order, table, restaurant, type) {
+  let types = [];
+  if (Array.isArray(type)) {
+    types = type;
+  } else if (type === "both" || type === "all") {
+    types = ["order_slip", "payment_receipt"];
+  } else {
+    types = [type];
+  }
+
+  const bodies = types.map((t) =>
+    generateSingleReceiptBodyHTML(order, table, restaurant, t)
+  );
+
+  const bodyHTML = bodies.join(
+    '<div class="receipt-divider" style="page-break-before: always; margin: 30px 0; border-top: 2px dashed #666; padding-top: 20px;"></div>'
+  );
 
   // Combine into complete, beautifully styled HTML document
   return `
@@ -301,6 +349,12 @@ function generateReceiptHTML(order, table, restaurant, type) {
         padding: 0 !important;
         max-width: 100% !important;
       }
+      .receipt-divider {
+        page-break-before: always !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
       @page {
         margin: 0;
       }
@@ -329,7 +383,7 @@ function generateReceiptHTML(order, table, restaurant, type) {
     <div class="receipt">
       ${bodyHTML}
       <div class="footer-brand">
-        Powered by IPOS.vn
+        Powered by LongKa
       </div>
     </div>
   </div>

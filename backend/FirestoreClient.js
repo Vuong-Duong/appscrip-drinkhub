@@ -649,17 +649,22 @@ function firestoreBatchWrite_(
       switch (write.type) {
 
         case "set":
-
-        case "update":
           return {
             update: {
-              name:
-                documentName,
+              name: documentName,
+              fields: objectToFirestoreFields_(write.data || {}),
+            },
+          };
 
-              fields:
-                objectToFirestoreFields_(
-                  write.data || {}
-                ),
+        case "update":
+          const updateFieldPaths = Object.keys(write.data || {});
+          return {
+            update: {
+              name: documentName,
+              fields: objectToFirestoreFields_(write.data || {}),
+            },
+            updateMask: {
+              fieldPaths: updateFieldPaths,
             },
           };
 

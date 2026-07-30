@@ -92,6 +92,10 @@ export default function DiscountManagementPage() {
       setError("Vui lòng nhập giá trị giảm hợp lệ (số không âm)");
       return;
     }
+    if (form.type === "percent" && Number(valueStr) > 100) {
+      setError("Giảm giá theo phần trăm không được vượt quá 100%");
+      return;
+    }
     if (
       minOrderValueStr === "" ||
       isNaN(Number(minOrderValueStr)) ||

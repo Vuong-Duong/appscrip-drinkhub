@@ -34,6 +34,9 @@
  * CONFIG
  * ========================= */
 
+import { getStoredAuthUser } from "../utils/auth";
+import appStore from "../services/AppStore";
+
 /**
  * Giao tiếp API:
  * - HTML chạy TRONG Apps Script → google.script.run → gasApiBridge() (KHÔNG fetch Web App URL)
@@ -1084,35 +1087,39 @@ export const shiftApi = {
       .then((shifts) => {
         if (Array.isArray(shifts)) {
           writeLocalArray(LOCAL_DB_KEY.SHIFTS, shifts);
+          appStore.set("shifts", shifts);
         }
       })
       .catch((err) => {
         console.error("Background GET_SHIFTS failed:", err);
       });
 
-    return readLocalArray(LOCAL_DB_KEY.SHIFTS);
+    return appStore.get("shifts") || readLocalArray(LOCAL_DB_KEY.SHIFTS);
   },
 
   async createShift(payload) {
-    const shifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+    const shifts = appStore.get("shifts") || readLocalArray(LOCAL_DB_KEY.SHIFTS);
     const localShift = {
       id: makeLocalId("shift_local"),
       staffName: String(payload.staffName || "").trim(),
-      openingCash: toFiniteNumber(payload.openingCash),
-      totalRevenue: 0,
+      actualOpeningCash: toFiniteNumber(payload.actualOpeningCash ?? payload.openingCash),
+      actualClosingCash: 0,
       status: "open",
       startTime: new Date().toISOString(),
       endTime: null,
     };
-    writeLocalArray(LOCAL_DB_KEY.SHIFTS, [localShift, ...shifts]);
+    const updatedShifts = [localShift, ...shifts];
+    writeLocalArray(LOCAL_DB_KEY.SHIFTS, updatedShifts);
+    appStore.set("shifts", updatedShifts);
 
     request("CREATE_SHIFT", payload)
       .then((shift) => {
-        const currentShifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+        const currentShifts = appStore.get("shifts") || [];
         const updated = currentShifts.map((s) =>
           s.id === localShift.id ? shift : s
         );
         writeLocalArray(LOCAL_DB_KEY.SHIFTS, updated);
+        appStore.set("shifts", updated);
       })
       .catch((err) => {
         console.error("Background CREATE_SHIFT failed:", err);
@@ -1122,24 +1129,32 @@ export const shiftApi = {
   },
 
   async closeShift(shiftId, payload) {
-    const shifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+    const shifts = appStore.get("shifts") || readLocalArray(LOCAL_DB_KEY.SHIFTS);
     const updated = shifts.map((s) =>
       s.id === shiftId
-        ? { ...s, status: "closed", endTime: new Date().toISOString(), ...payload }
+        ? {
+            ...s,
+            status: "closed",
+            endTime: new Date().toISOString(),
+            actualClosingCash: toFiniteNumber(payload.actualClosingCash ?? payload.cashAmount),
+            ...payload,
+          }
         : s,
     );
     writeLocalArray(LOCAL_DB_KEY.SHIFTS, updated);
+    appStore.set("shifts", updated);
 
     request("CLOSE_SHIFT", {
       shiftId,
       ...payload,
     })
       .then((result) => {
-        const currentShifts = readLocalArray(LOCAL_DB_KEY.SHIFTS);
+        const currentShifts = appStore.get("shifts") || [];
         const updatedWithServer = currentShifts.map((s) =>
           s.id === shiftId ? { ...s, ...result, status: "closed" } : s,
         );
         writeLocalArray(LOCAL_DB_KEY.SHIFTS, updatedWithServer);
+        appStore.set("shifts", updatedWithServer);
       })
       .catch((err) => {
         console.error("Background CLOSE_SHIFT failed:", err);

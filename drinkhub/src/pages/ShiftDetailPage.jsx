@@ -6,6 +6,7 @@ import appStore from "../services/AppStore";
 import { shiftApi } from "../api/Api";
 import { formatCurrency } from "../utils/helpers";
 import { getStoredAuthUser } from "../utils/auth";
+import { printReceipt } from "../utils/receipt";
 
 export default function ShiftDetailPage() {
   const navigate = useNavigate();
@@ -19,6 +20,9 @@ export default function ShiftDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Order Detail Modal
+  const [selectedOrder, setSelectedOrder] = useState(null);
 
   // Close shift inputs
   const [actualClosingCashInput, setActualClosingCashInput] = useState("");
@@ -75,6 +79,7 @@ export default function ShiftDetailPage() {
       });
 
       setShowCloseModal(false);
+      navigate("/ca-lam-viec", { replace: true });
     } catch (err) {
       setError(err.message || "Đóng ca thất bại");
     } finally {
@@ -247,27 +252,45 @@ export default function ShiftDetailPage() {
               Chưa có đơn hàng nào trong khoảng thời gian ca này
             </p>
           ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
               {shiftOrders.map((order) => (
-                <div
+                <button
                   key={order.id}
-                  className="flex justify-between items-center p-3.5 bg-gray-50 rounded-xl border border-gray-100"
+                  onClick={() => setSelectedOrder(order)}
+                  className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-blue-50/60 rounded-2xl border border-gray-100 hover:border-blue-200 transition-all text-left group active:scale-[0.99] cursor-pointer"
                 >
                   <div>
-                    <p className="font-bold text-gray-800">{order.id}</p>
-                    <p className="text-xs text-gray-500">
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-gray-900 text-base group-hover:text-blue-600">
+                        #{order.id}
+                      </p>
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                          order.paymentStatus === "PAID" || order.status === "CLOSED"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                      >
+                        {order.paymentStatus === "PAID" || order.status === "CLOSED"
+                          ? "Đã thanh toán"
+                          : "Chưa thanh toán"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
                       {order.customerName || "Khách lẻ"} • {order.paymentMethod === "transfer" ? "💳 Chuyển khoản" : "💵 Tiền mặt"}
+                      {order.items?.length ? ` • ${order.items.length} món` : ""}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-gray-900">
+                    <p className="font-bold text-blue-600 text-base">
                       {formatCurrency(order.grandTotal)}
                     </p>
-                    <p className="text-xs text-gray-400">
-                      {new Date(order.createdAt).toLocaleTimeString("vi-VN")}
+                    <p className="text-xs text-gray-400 mt-0.5 flex items-center justify-end gap-1">
+                      <span>{new Date(order.createdAt).toLocaleTimeString("vi-VN")}</span>
+                      <span className="text-blue-500 font-semibold group-hover:underline">Chi tiết &rarr;</span>
                     </p>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -433,6 +456,183 @@ export default function ShiftDetailPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xl font-bold">Chi tiết đơn #{selectedOrder.id}</h3>
+                  <span
+                    className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                      selectedOrder.paymentStatus === "PAID" || selectedOrder.status === "CLOSED"
+                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                        : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                    }`}
+                  >
+                    {selectedOrder.paymentStatus === "PAID" || selectedOrder.status === "CLOSED"
+                      ? "Đã thanh toán"
+                      : "Chờ thanh toán"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  Bàn: <span className="font-bold text-slate-200">{selectedOrder.tableName || selectedOrder.tableId || "Khách mang đi"}</span> • {new Date(selectedOrder.createdAt).toLocaleString("vi-VN")}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-lg flex items-center justify-center transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              {/* Customer & Staff Info */}
+              <div className="grid grid-cols-2 gap-3 bg-gray-50 p-3.5 rounded-2xl border border-gray-100 text-xs">
+                <div>
+                  <span className="text-gray-400 font-medium">Khách hàng:</span>
+                  <p className="font-bold text-gray-800 text-sm">{selectedOrder.customerName || "Khách lẻ"}</p>
+                </div>
+                <div>
+                  <span className="text-gray-400 font-medium">Hình thức thanh toán:</span>
+                  <p className="font-bold text-gray-800 text-sm">
+                    {selectedOrder.paymentMethod === "transfer" ? "💳 Chuyển khoản" : "💵 Tiền mặt"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div>
+                <h4 className="font-bold text-sm text-gray-800 mb-3">Danh sách món ăn & nước uống</h4>
+                {(!selectedOrder.items || selectedOrder.items.length === 0) ? (
+                  <p className="text-center text-gray-400 py-6 text-sm">Không có thông tin món ăn</p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {selectedOrder.items.map((item, idx) => {
+                      const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
+                      const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+
+                      return (
+                        <div
+                          key={idx}
+                          className="bg-gray-50 p-3.5 rounded-2xl border border-gray-100 space-y-1.5"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <p className="font-semibold text-gray-900 text-sm">
+                                {item.productName || item.name}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                {item.quantity} x {formatCurrency(item.unitPrice || item.price || 0)}
+                              </p>
+                            </div>
+                            <p className="font-bold text-blue-600 text-sm shrink-0 ml-3">
+                              {formatCurrency(item.subtotal || item.total || 0)}
+                            </p>
+                          </div>
+
+                          {/* Toppings */}
+                          {hasToppings && (
+                            <div className="pl-3 text-xs text-blue-700 space-y-0.5 border-l-2 border-blue-300">
+                              {item.toppings.map((top, tIdx) => (
+                                <div key={tIdx} className="flex justify-between">
+                                  <span>+ {top.name || top.productName} (x{top.quantity || 1})</span>
+                                  {Number(top.price || 0) > 0 && (
+                                    <span className="font-medium">+{formatCurrency(Number(top.price) * (top.quantity || 1))}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Notes */}
+                          {hasNotes && (
+                            <div className="pl-3 text-xs text-amber-700 italic border-l-2 border-amber-300">
+                              📝 {item.notes?.join(", ")} {item.customNote && `("${item.customNote}")`}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Order Summary */}
+              <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100 space-y-2 text-sm font-medium">
+                <div className="flex justify-between text-gray-600">
+                  <span>Tạm tính</span>
+                  <span>{formatCurrency(selectedOrder.subtotal || selectedOrder.grandTotal)}</span>
+                </div>
+                {Number(selectedOrder.discount || 0) > 0 && (
+                  <div className="flex justify-between text-red-600">
+                    <span>Giảm giá</span>
+                    <span>-{formatCurrency(selectedOrder.discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-2 border-t font-bold text-base text-gray-900">
+                  <span>Tổng tiền thanh toán</span>
+                  <span className="text-blue-600">{formatCurrency(selectedOrder.grandTotal)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-gray-50 border-t flex items-center justify-between gap-3">
+              <button
+                onClick={() => {
+                  try {
+                    const receiptData = {
+                      id: selectedOrder.id,
+                      items: (selectedOrder.items || []).map((item) => ({
+                        name: item.productName || item.name,
+                        quantity: item.quantity,
+                        price: item.unitPrice || item.price,
+                        total: item.subtotal || item.total,
+                        toppings: item.toppings || [],
+                        notes: item.notes || [],
+                        customNote: item.customNote || "",
+                      })),
+                      subtotal: selectedOrder.subtotal || selectedOrder.grandTotal,
+                      discount: selectedOrder.discount || 0,
+                      tax: 0,
+                      total: selectedOrder.grandTotal,
+                    };
+                    const tableData = {
+                      number: selectedOrder.tableName || selectedOrder.tableId || "N/A",
+                      guestCount: "1",
+                    };
+                    const restaurantData = appStore.get("settings") || {
+                      name: "Quán Nước Quỳnh Anh",
+                      address: "Địa chỉ nhà hàng",
+                      phone: "Số điện thoại",
+                    };
+                    printReceipt(receiptData, tableData, restaurantData, ["order_slip", "payment_receipt"]);
+                  } catch (err) {
+                    console.error("Print receipt error:", err);
+                  }
+                }}
+                className="px-4 py-2.5 bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold rounded-2xl text-xs sm:text-sm transition flex items-center gap-1.5"
+              >
+                🖨️ In lại phiếu & hóa đơn
+              </button>
+
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl text-xs sm:text-sm transition"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

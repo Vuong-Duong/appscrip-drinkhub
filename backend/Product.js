@@ -19,15 +19,24 @@ function getProducts(activeOnly = true) {
 }
 
 function mapProductDoc_(doc) {
+  const d = doc || {};
+  const priceVal = d.price ?? d.salePrice ?? d.sale_price ?? d.PRICE ?? d.SALE_PRICE;
+  const costVal = d.cost ?? d.costPrice ?? d.cost_price ?? d.COST ?? d.COST_PRICE;
+
+  const safePrice = toNumberSafe_(priceVal, 0);
+  const safeCost = toNumberSafe_(costVal, 0);
+
   return {
-    id: trimSafe_(doc.id),
-    name: trimSafe_(doc.name),
-    price: toNumberSafe_(doc.price),
-    cost: toNumberSafe_(doc.cost),
-    stock: toNumberSafe_(doc.stock),
-    category: trimSafe_(doc.category),
-    status: trimSafe_(doc.status),
-    image: trimSafe_(doc.image),
+    id: trimSafe_(d.id),
+    name: trimSafe_(d.name),
+    price: safePrice,
+    salePrice: safePrice,
+    cost: safeCost,
+    costPrice: safeCost,
+    stock: toNumberSafe_(d.stock, 0),
+    category: trimSafe_(d.category),
+    status: trimSafe_(d.status),
+    image: trimSafe_(d.image),
   };
 }
 
@@ -36,12 +45,20 @@ function normalizeProductPayload_(payload) {
   const name = trimSafe_(data.name);
   if (!name) throw new Error("MISSING_FIELDS: name");
 
+  const priceVal = data.price ?? data.salePrice ?? data.sale_price;
+  const costVal = data.cost ?? data.costPrice ?? data.cost_price;
+
+  const safePrice = toNumberSafe_(priceVal, 0);
+  const safeCost = toNumberSafe_(costVal, 0);
+
   return {
     name,
     category: trimSafe_(data.category),
-    price: toNumberSafe_(data.price),
-    cost: toNumberSafe_(data.cost),
-    stock: toNumberSafe_(data.stock),
+    price: safePrice,
+    salePrice: safePrice,
+    cost: safeCost,
+    costPrice: safeCost,
+    stock: toNumberSafe_(data.stock, 0),
     status: trimSafe_(data.status || "ACTIVE").toUpperCase(),
     image: trimSafe_(data.image),
   };
@@ -58,7 +75,9 @@ function createProduct(payload) {
       name: data.name,
       category: data.category,
       price: data.price,
+      salePrice: data.salePrice,
       cost: data.cost,
+      costPrice: data.costPrice,
       stock: data.stock,
       status: data.status,
       image: data.image,
@@ -85,9 +104,17 @@ function updateProduct(productId, payload) {
 
     if (data.name !== undefined) updates.name = trimSafe_(data.name);
     if (data.category !== undefined) updates.category = trimSafe_(data.category);
-    if (data.price !== undefined) updates.price = toNumberSafe_(data.price);
-    if (data.cost !== undefined) updates.cost = toNumberSafe_(data.cost);
-    if (data.stock !== undefined) updates.stock = toNumberSafe_(data.stock);
+    if (data.price !== undefined || data.salePrice !== undefined) {
+      const pVal = toNumberSafe_(data.price ?? data.salePrice, 0);
+      updates.price = pVal;
+      updates.salePrice = pVal;
+    }
+    if (data.cost !== undefined || data.costPrice !== undefined) {
+      const cVal = toNumberSafe_(data.cost ?? data.costPrice, 0);
+      updates.cost = cVal;
+      updates.costPrice = cVal;
+    }
+    if (data.stock !== undefined) updates.stock = toNumberSafe_(data.stock, 0);
     if (data.status !== undefined) updates.status = trimSafe_(data.status).toUpperCase();
     if (data.image !== undefined) updates.image = trimSafe_(data.image);
     updates.updatedAt = toIsoString_(new Date());
@@ -123,12 +150,23 @@ function validateStockBeforeOrder_(items) {
     throw new Error("INVALID_ITEMS: items must be non-empty array");
   }
 
-  // Aggregate quantities by productId
+  // Aggregate quantities by productId (including Toppings)
   const qtyMap = {};
   items.forEach(function (item) {
     const pId = trimSafe_(item.productId);
-    if (!pId) return;
-    qtyMap[pId] = (qtyMap[pId] || 0) + toNumberSafe_(item.quantity);
+    const mainQty = toNumberSafe_(item.quantity);
+    if (pId) {
+      qtyMap[pId] = (qtyMap[pId] || 0) + mainQty;
+    }
+    if (Array.isArray(item.toppings)) {
+      item.toppings.forEach(function (top) {
+        const topId = trimSafe_(top.id || top.productId);
+        if (topId) {
+          const topQty = mainQty * toNumberSafe_(top.quantity || 1);
+          qtyMap[topId] = (qtyMap[topId] || 0) + topQty;
+        }
+      });
+    }
   });
 
   var products = getProducts(false); // Get all products
@@ -175,13 +213,31 @@ function reduceProductStock_(items) {
     var journalWrites = [];
     var now = toIsoString_(new Date());
 
+    // Aggregate reduce quantities by productId (including Toppings)
+    var reduceMap = {};
     items.forEach(function (item) {
-      var productId = trimSafe_(item.productId);
+      var pId = trimSafe_(item.productId);
+      var mainQty = toNumberSafe_(item.quantity);
+      if (pId) {
+        reduceMap[pId] = (reduceMap[pId] || 0) + mainQty;
+      }
+      if (Array.isArray(item.toppings)) {
+        item.toppings.forEach(function (top) {
+          var topId = trimSafe_(top.id || top.productId);
+          if (topId) {
+            var topQty = mainQty * toNumberSafe_(top.quantity || 1);
+            reduceMap[topId] = (reduceMap[topId] || 0) + topQty;
+          }
+        });
+      }
+    });
+
+    Object.keys(reduceMap).forEach(function (productId) {
       var product = productMap[productId];
       if (!product) return;
 
       var currentStock = toNumberSafe_(product.stock);
-      var reduceQty = toNumberSafe_(item.quantity);
+      var reduceQty = reduceMap[productId];
       var newStock = currentStock - reduceQty;
 
       // ✓ Prevent negative stock

@@ -10,6 +10,7 @@ import { getStoredAuthUser } from "../utils/auth";
 
 export default function TablePage() {
   const navigate = useNavigate();
+  const [storeState, setStoreState] = useState(appStore.getState());
   const [activeTab, setActiveTab] = useState("ban");
   const [tables, setTables] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -20,6 +21,9 @@ export default function TablePage() {
   const [isCreating, setIsCreating] = useState(false);
   const [addError, setAddError] = useState("");
 
+  const shifts = Array.isArray(storeState.shifts) ? storeState.shifts : [];
+  const hasOpenShift = shifts.some((s) => s.status === "open");
+
   // Reset customer display to welcome state when entering table dashboard
   useEffect(() => {
     CustomerDisplayService.sendReset();
@@ -27,6 +31,7 @@ export default function TablePage() {
 
   useEffect(() => {
     const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
       const newTables = Array.isArray(state.tables) ? state.tables : [];
       setTables(newTables);
       // Only show loading if there's NO data yet and global loading is true
@@ -263,6 +268,37 @@ export default function TablePage() {
                 className="flex-1 py-4 bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:bg-gray-300 rounded-br-3xl transition"
               >
                 {isCreating ? "Đang tạo..." : "Tạo bàn"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Chặn Bán Hàng Khi Chưa Mở Ca */}
+      {!hasOpenShift && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center shadow-2xl border border-gray-100">
+            <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-5 shadow-inner">
+              ⏰
+            </div>
+            <h3 className="text-2xl font-bold text-gray-900 mb-2">
+              Chưa mở ca làm việc!
+            </h3>
+            <p className="text-gray-600 text-sm mb-6 leading-relaxed">
+              Nhân viên bắt buộc phải nhập số tiền thực tế két đầu ca trước khi chọn bàn và bán hàng.
+            </p>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => navigate("/shift")}
+                className="w-full py-4 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-2xl font-bold transition text-base shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2"
+              >
+                <span>⚡ Đến trang Mở ca ngay</span>
+              </button>
+              <button
+                onClick={() => navigate("/")}
+                className="w-full py-3 text-gray-500 hover:text-gray-800 font-medium transition text-sm"
+              >
+                &larr; Quay lại trang chủ
               </button>
             </div>
           </div>
