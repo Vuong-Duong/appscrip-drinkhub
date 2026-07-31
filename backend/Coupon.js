@@ -48,7 +48,12 @@ function getCoupons(activeOnly) {
     coupons.push(coupon);
   }
 
-  return coupons;
+  return coupons.sort(function (a, b) {
+    var timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+    var timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+    if (timeA && timeB && timeA !== timeB) return timeB - timeA;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
 }
 
 function createCoupon(payload) {

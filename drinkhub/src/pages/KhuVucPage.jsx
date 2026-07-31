@@ -164,15 +164,15 @@ export default function TablePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {isLoading && (
-            <div className="col-span-5 text-center py-16 text-gray-500">
+            <div className="col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-5 text-center py-16 text-gray-500">
               Đang tải danh sách bàn...
             </div>
           )}
 
           {!isLoading && tables.length === 0 && (
-            <div className="col-span-5 text-center py-16 text-gray-500">
+            <div className="col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-5 text-center py-16 text-gray-500">
               Chưa có dữ liệu bàn
             </div>
           )}
@@ -183,7 +183,7 @@ export default function TablePage() {
               onClick={() => navigate(`/order/${encodeURIComponent(table.id)}`)}
               className={`aspect-[1.08] rounded-3xl border-2 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-[0.97] ${getTableStyle(table.status)}`}
             >
-              <div className="text-5xl font-bold text-gray-700 mb-2">
+              <div className="text-2xl sm:text-4xl lg:text-5xl font-bold text-gray-700 mb-2">
                 {getTableLabel(table)}
               </div>
 

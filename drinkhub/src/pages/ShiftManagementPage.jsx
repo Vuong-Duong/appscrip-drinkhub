@@ -83,8 +83,14 @@ export default function ShiftManagementPage() {
 
   const [filterDate, setFilterDate] = useState("");
 
-  const openShifts = shifts.filter((s) => s.status === "open");
-  const closedShifts = shifts.filter((s) => s.status === "closed");
+  const sortedShifts = [...shifts].sort((a, b) => {
+    const timeA = new Date(a.startTime || a.createdAt || 0).getTime();
+    const timeB = new Date(b.startTime || b.createdAt || 0).getTime();
+    return timeB - timeA;
+  });
+
+  const openShifts = sortedShifts.filter((s) => s.status === "open");
+  const closedShifts = sortedShifts.filter((s) => s.status === "closed");
 
   const filteredClosedShifts = closedShifts.filter((s) => {
     if (!filterDate) return true;

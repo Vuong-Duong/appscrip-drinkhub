@@ -69,7 +69,7 @@ export const API_CONFIG = {
 
   API_KEY: import.meta.env.VITE_GAS_API_KEY || "",
 
-  TIMEOUT: 30000,
+  TIMEOUT: 60000,
 
   SLOW_REQUEST_MS: 1000,
 
@@ -301,31 +301,43 @@ export async function request(action, payload = {}, options = {}) {
   const transport = getApiTransport_();
   logger.always(`${action} via ${transport}`);
 
-  try {
-    if (transport === "gas-run") {
-      return await requestViaGasBridge_(action, payload);
+  const maxRetries = options.retries !== undefined ? options.retries : (["CREATE_ORDER", "PROCESS_PAYMENT", "ADD_ITEMS"].includes(action) ? 1 : 0);
+  let attempt = 0;
+
+  while (attempt <= maxRetries) {
+    try {
+      if (transport === "gas-run") {
+        return await requestViaGasBridge_(action, payload);
+      }
+
+      if (transport === "fetch-dev") {
+        return await requestViaFetch_(action, payload, options);
+      }
+
+      throw new ApiError(
+        "UNSUPPORTED_HOST",
+        "Chạy app trong Web App Apps Script (google.script.run) hoặc dev: npm run dev. Không mở dist/index.html trực tiếp và không fetch URL /exec khi nhúng GAS.",
+      );
+    } catch (err) {
+      const apiErr =
+        err instanceof ApiError
+          ? err
+          : new ApiError("NETWORK_ERROR", err?.message || String(err));
+
+      if (apiErr.code === "REQUEST_TIMEOUT" && attempt < maxRetries) {
+        attempt++;
+        logger.always(`[RETRY API] ${action} timed out, retrying attempt ${attempt}/${maxRetries}...`);
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+
+      logger.error(`${action} failed`, {
+        transport,
+        code: apiErr.code,
+        details: apiErr.details,
+      });
+      throw apiErr;
     }
-
-    if (transport === "fetch-dev") {
-      return await requestViaFetch_(action, payload, options);
-    }
-
-    throw new ApiError(
-      "UNSUPPORTED_HOST",
-      "Chạy app trong Web App Apps Script (google.script.run) hoặc dev: npm run dev. Không mở dist/index.html trực tiếp và không fetch URL /exec khi nhúng GAS.",
-    );
-  } catch (err) {
-    const apiErr =
-      err instanceof ApiError
-        ? err
-        : new ApiError("NETWORK_ERROR", err?.message || String(err));
-
-    logger.error(`${action} failed`, {
-      transport,
-      code: apiErr.code,
-      details: apiErr.details,
-    });
-    throw apiErr;
   }
 }
 

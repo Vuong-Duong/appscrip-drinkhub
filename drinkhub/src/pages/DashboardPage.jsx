@@ -228,17 +228,93 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
   }));
 
   const paidOrderIds = new Set(filteredPayments.map((p) => p.orderId).filter(Boolean));
-  const filteredOrders = allOrders.filter((o) => paidOrderIds.has(o.id));
+  const filteredOrders = allOrders.filter(
+    (o) => paidOrderIds.has(o.id) || isDateInRange(o.createdAt || o.paidAt),
+  );
 
-  const orderDetailsInRange = allOrderDetails.filter((d) => paidOrderIds.has(d.orderId));
+  // Map giá vốn và danh mục sản phẩm từ allProducts
+  const productCostMap = {};
+  const productCategoryMap = {};
+  allProducts.forEach((p) => {
+    const cost = Number(p.cost ?? p.costPrice ?? 0);
+    const cat = (p.category || "Khác").trim();
+    if (p.id) {
+      productCostMap[String(p.id)] = cost;
+      productCategoryMap[String(p.id)] = cat;
+    }
+    if (p.name) {
+      const nameKey = String(p.name).trim().toLowerCase();
+      productCostMap[nameKey] = cost;
+      productCategoryMap[nameKey] = cat;
+    }
+  });
+
+  // Trích xuất tất cả các món đã bán trong kỳ từ order.items và allOrderDetails
+  const allItemRowsInRange = [];
+  filteredOrders.forEach((o) => {
+    if (Array.isArray(o.items) && o.items.length > 0) {
+      o.items.forEach((item) => {
+        allItemRowsInRange.push({
+          productId: item.productId || item.id,
+          productName: item.productName || item.name || "Món không tên",
+          quantity: Number(item.quantity || 1),
+          subtotal: Number(item.subtotal || item.total || (Number(item.unitPrice || item.price || 0) * Number(item.quantity || 1))),
+          toppings: item.toppings || [],
+        });
+      });
+    }
+  });
+
+  // Nạp thêm từ allOrderDetails nếu danh sách trước đó rỗng
+  if (allItemRowsInRange.length === 0 && allOrderDetails.length > 0) {
+    allOrderDetails.forEach((d) => {
+      if (paidOrderIds.has(d.orderId) || isDateInRange(d.createdAt)) {
+        allItemRowsInRange.push({
+          productId: d.productId || d.id,
+          productName: d.productName || d.name || "Món không tên",
+          quantity: Number(d.quantity || 1),
+          subtotal: Number(d.subtotal || d.total || 0),
+          toppings: [],
+        });
+      }
+    });
+  }
+
+  // Tổng hợp Mặt hàng bán chạy, Nhóm hàng bán chạy và Tổng giá vốn
   const topProducts = {};
-  orderDetailsInRange.forEach((d) => {
-    const name = d.productName || "Unknown";
-    const qty = Number(d.quantity) || 0;
-    const sub = Number(d.subtotal) || 0;
-    if (!topProducts[name]) topProducts[name] = { quantity: 0, revenue: 0 };
+  const topCategories = {};
+  let totalCost = 0;
+
+  allItemRowsInRange.forEach((item) => {
+    const name = item.productName;
+    const qty = item.quantity;
+    const sub = item.subtotal;
+    const idKey = String(item.productId || "");
+    const nameKey = String(name || "").trim().toLowerCase();
+
+    // Tính giá vốn món
+    const unitCost = productCostMap[idKey] ?? productCostMap[nameKey] ?? 0;
+    const itemCost = unitCost * qty;
+    totalCost += itemCost;
+
+    // Xác định nhóm hàng
+    const category = productCategoryMap[idKey] || productCategoryMap[nameKey] || "Khác";
+
+    // Mặt hàng bán chạy
+    if (!topProducts[name]) {
+      topProducts[name] = { quantity: 0, revenue: 0, cost: 0 };
+    }
     topProducts[name].quantity += qty;
     topProducts[name].revenue += sub;
+    topProducts[name].cost += itemCost;
+
+    // Nhóm hàng bán chạy
+    if (!topCategories[category]) {
+      topCategories[category] = { quantity: 0, revenue: 0, cost: 0 };
+    }
+    topCategories[category].quantity += qty;
+    topCategories[category].revenue += sub;
+    topCategories[category].cost += itemCost;
   });
 
   const topProductsArray = Object.entries(topProducts)
@@ -246,30 +322,19 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
       productName: name,
       quantity: data.quantity,
       revenue: data.revenue,
+      cost: data.cost,
+      profit: data.revenue - data.cost,
     }))
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 10);
-
-  const productCategoryMap = {};
-  allProducts.forEach((p) => {
-    productCategoryMap[p.id] = p.category || "Other";
-  });
-
-  const topCategories = {};
-  orderDetailsInRange.forEach((d) => {
-    const category = productCategoryMap[d.productId] || "Other";
-    const qty = Number(d.quantity) || 0;
-    const sub = Number(d.subtotal) || 0;
-    if (!topCategories[category]) topCategories[category] = { quantity: 0, revenue: 0 };
-    topCategories[category].quantity += qty;
-    topCategories[category].revenue += sub;
-  });
 
   const topCategoriesArray = Object.entries(topCategories)
     .map(([name, data]) => ({
       categoryName: name,
       quantity: data.quantity,
       revenue: data.revenue,
+      cost: data.cost,
+      profit: data.revenue - data.cost,
     }))
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 10);
@@ -290,6 +355,9 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
     amount,
   })).sort((a, b) => a.date.localeCompare(b.date));
 
+  const netProfit = totalRevenue - totalCost;
+  const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : "0.0";
+
   return {
     period: {
       range,
@@ -297,6 +365,9 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
       endDate: endDate ? endDate.toISOString() : null,
     },
     totalRevenue,
+    totalCost,
+    netProfit,
+    profitMargin,
     orderCount: filteredOrders.length,
     paymentMethods: paymentMethodsArray,
     topProducts: topProductsArray,
@@ -346,6 +417,35 @@ export default function DashboardPage() {
     handleStateChange(appStore.getState());
 
     return unsubscribe;
+  }, [filterRange, customStart, customEnd]);
+
+  // Tải dữ liệu báo cáo từ server khi người dùng chọn lọc ngày quá quá khứ (30 ngày, tháng trước, tùy chỉnh)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchServerReportIfNeeded = async () => {
+      if (filterRange !== "today") {
+        try {
+          const serverData = await reportApi.getReport({
+            range: filterRange,
+            customStart: filterRange === "custom" ? customStart : null,
+            customEnd: filterRange === "custom" ? customEnd : null,
+          });
+          if (isMounted && serverData) {
+            setReport((prev) => ({
+              ...prev,
+              ...serverData,
+            }));
+          }
+        } catch (err) {
+          console.warn("Failed to fetch server report, falling back to local calculation:", err);
+        }
+      }
+    };
+
+    fetchServerReportIfNeeded();
+    return () => {
+      isMounted = false;
+    };
   }, [filterRange, customStart, customEnd]);
 
   const handleApplyCustomFilter = () => {
@@ -492,21 +592,78 @@ export default function DashboardPage() {
         {/* Main Report Section */}
         {report && (
           <div className="space-y-8">
-            {/* Total Revenue */}
-            <div className="bg-linear-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-3xl p-8 shadow-sm">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-sm text-blue-600 font-medium mb-2">
-                    TỔNG DOANH THU
-                  </p>
-                  <h2 className="text-5xl font-bold text-blue-900">
-                    {formatCurrency(report.totalRevenue)}
-                  </h2>
-                  <p className="text-sm text-blue-700 mt-3">
-                    {report.orderCount} đơn hàng
-                  </p>
+            {/* Profit & Loss Overview Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Doanh thu */}
+              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-3xl p-6 text-white shadow-md relative overflow-hidden">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-blue-100 mb-1">
+                      Tổng Doanh Thu
+                    </p>
+                    <h2 className="text-2xl sm:text-3xl font-extrabold">
+                      {formatCurrency(report.totalRevenue)}
+                    </h2>
+                    <p className="text-xs text-blue-100 mt-2 font-medium">
+                      📋 {report.orderCount} đơn hàng hoàn tất
+                    </p>
+                  </div>
+                  <div className="text-4xl opacity-80">💰</div>
                 </div>
-                <div className="text-6xl opacity-20">💰</div>
+              </div>
+
+              {/* Giá vốn */}
+              <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-3xl p-6 text-white shadow-md relative overflow-hidden">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-100 mb-1">
+                      Tổng Giá Vốn (Tiền Vốn)
+                    </p>
+                    <h2 className="text-2xl sm:text-3xl font-extrabold">
+                      {formatCurrency(report.totalCost)}
+                    </h2>
+                    <p className="text-xs text-amber-100 mt-2 font-medium">
+                      📦 Giá vốn nguyên liệu & món
+                    </p>
+                  </div>
+                  <div className="text-4xl opacity-80">📦</div>
+                </div>
+              </div>
+
+              {/* Lợi nhuận ròng */}
+              <div className={`bg-gradient-to-br ${report.netProfit >= 0 ? "from-emerald-500 to-emerald-600" : "from-red-500 to-red-600"} rounded-3xl p-6 text-white shadow-md relative overflow-hidden`}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-emerald-100 mb-1">
+                      Lợi Nhuận Ròng (Lời / Lỗ)
+                    </p>
+                    <h2 className="text-2xl sm:text-3xl font-extrabold">
+                      {formatCurrency(report.netProfit)}
+                    </h2>
+                    <p className="text-xs text-emerald-100 mt-2 font-medium">
+                      {report.netProfit >= 0 ? "📈 Kinh doanh có lãi" : "📉 Đang ghi nhận lỗ"}
+                    </p>
+                  </div>
+                  <div className="text-4xl opacity-80">{report.netProfit >= 0 ? "📊" : "⚠️"}</div>
+                </div>
+              </div>
+
+              {/* Tỷ suất lợi nhuận */}
+              <div className="bg-gradient-to-br from-violet-500 to-purple-600 rounded-3xl p-6 text-white shadow-md relative overflow-hidden">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-violet-100 mb-1">
+                      Tỷ Suất Lợi Nhuận
+                    </p>
+                    <h2 className="text-2xl sm:text-3xl font-extrabold">
+                      {report.profitMargin}%
+                    </h2>
+                    <p className="text-xs text-violet-100 mt-2 font-medium">
+                      ⚡ Hiệu suất sinh lời / doanh thu
+                    </p>
+                  </div>
+                  <div className="text-4xl opacity-80">🎯</div>
+                </div>
               </div>
             </div>
             {/* Revenue By Date */}

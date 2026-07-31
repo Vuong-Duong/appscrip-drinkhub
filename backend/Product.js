@@ -15,7 +15,13 @@ function getProducts(activeOnly = true) {
       var status = trimSafe_(doc.status);
       return status !== "INACTIVE" && status !== "DELETED";
     })
-    .map(mapProductDoc_);
+    .map(mapProductDoc_)
+    .sort(function (a, b) {
+      var timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+      var timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+      if (timeA && timeB && timeA !== timeB) return timeB - timeA;
+      return String(b.id || "").localeCompare(String(a.id || ""));
+    });
 }
 
 function mapProductDoc_(doc) {

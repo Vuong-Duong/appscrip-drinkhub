@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -58,6 +58,28 @@ export default function ShiftDetailPage() {
 
     return unsubscribe;
   }, [decodedShiftId, showCloseModal]);
+
+  const shiftOrders = useMemo(() => {
+    if (!shift || !shift.startTime) return [];
+    const startTime = new Date(shift.startTime).getTime();
+    const endTime = shift.endTime ? new Date(shift.endTime).getTime() : Date.now() + 86400000;
+    const allDetails = storeState.orderDetails || [];
+
+    return orders
+      .filter((o) => {
+        const orderTime = new Date(o.createdAt || o.paidAt || 0).getTime();
+        return orderTime >= startTime && orderTime <= endTime;
+      })
+      .map((o) => {
+        const detailItems = allDetails.filter((d) => d.orderId === o.id);
+        const items = Array.isArray(o.items) && o.items.length > 0 ? o.items : detailItems;
+        return {
+          ...o,
+          items,
+        };
+      })
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [shift, orders, storeState?.orderDetails]);
 
   // Handle Close Shift (Staff enters actual closing cash)
   const handleCloseShift = async () => {
@@ -155,12 +177,7 @@ export default function ShiftDetailPage() {
     );
   }
 
-  const shiftOrders = orders.filter((o) => {
-    const orderDate = new Date(o.createdAt);
-    const shiftStart = new Date(shift.startTime);
-    const shiftEnd = shift.endTime ? new Date(shift.endTime) : new Date();
-    return orderDate >= shiftStart && orderDate <= shiftEnd;
-  });
+
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">

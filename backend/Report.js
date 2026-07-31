@@ -145,21 +145,37 @@ const getReportData = (filters = {}) => {
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, 10);
 
-    // 6. TOP CATEGORIES FROM VALID EXISTING ORDERS
+    // 6. TOP CATEGORIES & COST OF GOODS SOLD FROM VALID EXISTING ORDERS
     const allProducts = getProducts(false) || [];
     const productCategoryMap = {};
+    const productCostMap = {};
     allProducts.forEach((prod) => {
-      productCategoryMap[prod.id] = trimSafe_(prod.category) || "Other";
+      const cat = trimSafe_(prod.category) || "Khác";
+      const cost = toNumberSafe_(prod.cost || prod.costPrice, 0);
+      if (prod.id) {
+        productCategoryMap[trimSafe_(prod.id)] = cat;
+        productCostMap[trimSafe_(prod.id)] = cost;
+      }
+      if (prod.name) {
+        const nameKey = trimSafe_(prod.name).toLowerCase();
+        productCategoryMap[nameKey] = cat;
+        productCostMap[nameKey] = cost;
+      }
     });
 
+    let totalCost = 0;
     const topCategories = {};
     validFilteredOrders.forEach((order) => {
       const items = Array.isArray(order.items) ? order.items : [];
       items.forEach((item) => {
         const productId = trimSafe_(item.productId);
-        const category = productCategoryMap[productId] || "Other";
+        const productNameKey = trimSafe_(item.productName || item.name).toLowerCase();
+        const category = productCategoryMap[productId] || productCategoryMap[productNameKey] || "Khác";
         const quantity = toNumberSafe_(item.quantity, 0);
         const subtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
+        const unitCost = productCostMap[productId] ?? productCostMap[productNameKey] ?? 0;
+
+        totalCost += unitCost * quantity;
 
         if (!topCategories[category]) {
           topCategories[category] = { quantity: 0, revenue: 0 };
@@ -177,6 +193,9 @@ const getReportData = (filters = {}) => {
       }))
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, 10);
+
+    const netProfit = totalRevenue - totalCost;
+    const profitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : "0.0";
 
     // 7. REVENUE BY DATE (GMT+7 daily aggregation)
     const revenueByDate = {};
@@ -204,6 +223,9 @@ const getReportData = (filters = {}) => {
         endDate: dateRange.end ? toIsoString_(dateRange.end) : null,
       },
       totalRevenue,
+      totalCost,
+      netProfit,
+      profitMargin,
       orderCount: validFilteredOrders.length,
       paymentMethods: paymentMethodsArray,
       topProducts: topProductsArray,

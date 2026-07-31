@@ -32,7 +32,15 @@ export default function DiscountManagementPage() {
     return unsubscribe;
   }, []);
 
-  const discounts = storeState.discounts || [];
+  const discounts = useMemo(() => {
+    const raw = storeState.discounts || [];
+    return [...raw].sort((a, b) => {
+      const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+      const timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+      if (timeA && timeB && timeA !== timeB) return timeB - timeA;
+      return String(b.id || "").localeCompare(String(a.id || ""));
+    });
+  }, [storeState.discounts]);
   const isLoading = storeState.loading;
 
   const openCreateModal = () => {

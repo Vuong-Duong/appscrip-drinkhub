@@ -28,13 +28,15 @@ const getShifts = (filters = {}) => {
       })
       .filter((s) => s !== null);
 
+    const sortedShifts = normalized.sort(
+      (a, b) => new Date(b.startTime || b.createdAt || 0).getTime() - new Date(a.startTime || a.createdAt || 0).getTime(),
+    );
+
     if (filters.status) {
-      return normalized.filter((s) => s.status === filters.status);
+      return sortedShifts.filter((s) => s.status === filters.status);
     }
 
-    return normalized.sort(
-      (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime(),
-    );
+    return sortedShifts;
   } catch (err) {
     logAction_("ERROR", "GET_SHIFTS", "system", { error: err.message });
     throw new Error("SHIFT_FETCH_FAILED");

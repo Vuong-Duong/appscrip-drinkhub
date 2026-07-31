@@ -49,7 +49,18 @@ const validateOrderPayload = (payload) => {
     if (price < 0) {
       errors.push(`Item ${idx}: unitPrice cannot be negative`);
     }
-    const expectedSubtotal = qty * price;
+
+    // Tính tổng đơn giá các Topping đi kèm (nếu có)
+    let toppingsSum = 0;
+    if (Array.isArray(item.toppings)) {
+      item.toppings.forEach((t) => {
+        const topPrice = toNumberSafe_(t.price || t.unitPrice);
+        const topQty = Math.max(1, toNumberSafe_(t.quantity || 1));
+        toppingsSum += topPrice * topQty;
+      });
+    }
+
+    const expectedSubtotal = qty * (price + toppingsSum);
     const itemSubtotal = toNumberSafe_(item.subtotal);
     if (Math.abs(expectedSubtotal - itemSubtotal) > 0.01) {
       errors.push(

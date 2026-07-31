@@ -231,7 +231,10 @@ export default function BillSummaryPage() {
           });
         } catch (syncErr) {
           console.error("Background payment sync failed:", syncErr);
-          appStore.setError("Lỗi đồng bộ thanh toán lên máy chủ");
+          const errMsg = syncErr?.code === "REQUEST_TIMEOUT"
+            ? "Mạng phản hồi chậm: Đơn hàng đã ghi nhận cục bộ và sẽ tự động đồng bộ khi kết nối ổn định"
+            : "Lỗi đồng bộ thanh toán lên máy chủ";
+          appStore.setError(errMsg);
         }
       })();
     } catch (err) {
@@ -364,7 +367,7 @@ export default function BillSummaryPage() {
           </div>
 
           {/* Right Sidebar - Payment Methods & Actions */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm flex flex-col h-fit sticky top-20">
+          <div className="bg-white rounded-3xl p-6 shadow-sm flex flex-col h-fit lg:sticky lg:top-20">
             {/* Payment Method */}
             <div className="mb-6 pb-6 border-b">
               <p className="text-sm text-gray-500 mb-2">Cách thanh toán</p>
@@ -399,6 +402,24 @@ export default function BillSummaryPage() {
               >
                 {isProcessing ? "Đang xử lý..." : "✅ Đã thanh toán"}
               </button>
+
+              {/* Nút In tem dán ly (khi tính năng xuất mã vạch BẬT) */}
+              {localStorage.getItem("barcodeEnabled") !== "false" && (
+                <button
+                  onClick={() => {
+                    import("../utils/stickerPrint").then((m) => {
+                      m.printCupStickers(
+                        { id: orderData.existingOrderId || `ORD${Date.now().toString().slice(-6)}`, items: orderData.items, tableName: orderData.tableName },
+                        { number: orderData.tableName },
+                        storeInfo
+                      );
+                    });
+                  }}
+                  className="w-full py-3.5 rounded-2xl font-bold text-sm bg-slate-800 text-white hover:bg-slate-900 transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  🏷️ In tem dán ly
+                </button>
+              )}
 
               {createdOrder && (
                 <button

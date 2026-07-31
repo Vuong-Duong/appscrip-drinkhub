@@ -36,7 +36,12 @@ export default function ShiftReconciliationPage() {
         customEnd: range === "custom" ? customEnd : null,
       };
       const data = await shiftApi.getReconciliation(filters);
-      setReconciliations(Array.isArray(data) ? data : []);
+      const sortedData = (Array.isArray(data) ? data : []).sort((a, b) => {
+        const timeA = new Date(a.shiftEndTime || a.shiftStartTime || a.createdAt || 0).getTime();
+        const timeB = new Date(b.shiftEndTime || b.shiftStartTime || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+      setReconciliations(sortedData);
     } catch (err) {
       setError(err.message || "Không thể tải dữ liệu đối chiếu tiền mặt ca");
     } finally {

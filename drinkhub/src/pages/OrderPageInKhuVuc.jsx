@@ -171,15 +171,24 @@ export default function OrderPage() {
     return Array.from(categoryMap.values());
   }, [products]);
 
-  const currentItems = products.filter((product) => {
-    const cat = String(product.category || "").trim();
-    if (cat.toLowerCase() === "topping") return false; // Ẩn sản phẩm Topping khỏi danh sách món chính
-    const sameCategory = normalizeCategoryId(cat) === activeCategory;
-    const matchesSearch = String(product.name || "")
-      .toLowerCase()
-      .includes(search.trim().toLowerCase());
-    return sameCategory && matchesSearch;
-  });
+  const currentItems = useMemo(() => {
+    return products
+      .filter((product) => {
+        const cat = String(product.category || "").trim();
+        if (cat.toLowerCase() === "topping") return false; // Ẩn sản phẩm Topping khỏi danh sách món chính
+        const sameCategory = normalizeCategoryId(cat) === activeCategory;
+        const matchesSearch = String(product.name || "")
+          .toLowerCase()
+          .includes(search.trim().toLowerCase());
+        return sameCategory && matchesSearch;
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
+        const timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
+        if (timeA && timeB && timeA !== timeB) return timeB - timeA;
+        return String(b.id || "").localeCompare(String(a.id || ""));
+      });
+  }, [products, activeCategory, search]);
 
   const addToCart = (product) => {
     const newItemCandidate = {
@@ -821,46 +830,50 @@ export default function OrderPage() {
           </div>
         )}
 
-        <div className="flex flex-1 p-6 gap-6 justify-between items-start pb-32">
-          <div className="w-72 bg-white rounded-3xl p-4 shrink-0 shadow-sm border border-gray-100">
-            <div className="relative mb-6">
+        <div className="flex flex-col lg:flex-row flex-1 p-3 sm:p-6 gap-4 sm:gap-6 justify-between items-start pb-32 w-full">
+          <div className="w-full lg:w-72 bg-white rounded-3xl p-4 shrink-0 shadow-sm border border-gray-100">
+            <div className="relative mb-4">
               <input
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Tìm kiếm..."
-                className="w-full pl-11 py-3 bg-gray-100 rounded-2xl"
+                placeholder="Tìm kiếm món..."
+                className="w-full pl-11 py-3 bg-gray-100 rounded-2xl text-sm"
               />
-              <span className="absolute left-4 top-4 text-gray-400">?</span>
+              <span className="absolute left-4 top-3.5 text-gray-400">🔍</span>
             </div>
-            {categories.map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={`w-full text-left px-5 py-4 rounded-2xl mb-2 transition ${
-                  activeCategory === cat.id
-                    ? "bg-blue-600 text-white"
-                    : "hover:bg-gray-100"
-                }`}
-              >
-                {cat.label}
-              </button>
-            ))}
+
+            {/* Category tabs: horizontal scroll on mobile, vertical list on desktop */}
+            <div className="flex lg:flex-col overflow-x-auto pb-2 lg:pb-0 gap-2 scrollbar-none">
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCategory(cat.id)}
+                  className={`whitespace-nowrap lg:whitespace-normal text-left px-4 py-3 sm:px-5 sm:py-4 rounded-2xl transition shrink-0 lg:shrink text-xs sm:text-sm font-semibold ${
+                    activeCategory === cat.id
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "bg-gray-50 lg:bg-transparent hover:bg-gray-100 text-gray-700"
+                  }`}
+                >
+                  {cat.label}
+                </button>
+              ))}
+            </div>
 
             <button
               onClick={() => {
                 setOutOfStockSearch("");
                 setShowOutOfStockModal(true);
               }}
-              className="w-full text-left px-5 py-4 rounded-2xl mb-2 transition bg-red-50 text-red-600 border border-red-200 font-semibold mt-4 flex items-center justify-between hover:bg-red-100"
+              className="w-full text-left px-4 py-3 sm:px-5 sm:py-4 rounded-2xl transition bg-red-50 text-red-600 border border-red-200 font-semibold mt-3 text-xs sm:text-sm flex items-center justify-between hover:bg-red-100"
             >
-              <span>🚨 Báo hết món khẩn cấp</span>
+              <span>🚨 Báo hết món</span>
               <span>&rarr;</span>
             </button>
           </div>
 
-          <div className="flex-1">
-            <h2 className="text-2xl font-bold mb-6">
+          <div className="flex-1 w-full">
+            <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 text-gray-900">
               {categories.find((c) => c.id === activeCategory)?.label ||
                 "Thực đơn"}
             </h2>
@@ -877,9 +890,9 @@ export default function OrderPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-5">
               {currentItems.map((item) => (
-                <button
+                <div
                   key={item.id}
                   onClick={() => addToCart(item)}
                   className="bg-white border border-gray-100 rounded-3xl overflow-hidden cursor-pointer active:scale-95 hover:shadow-md hover:border-blue-200 transition-all text-left flex flex-col h-full shadow-sm"
@@ -927,7 +940,7 @@ export default function OrderPage() {
                       </span>
                     </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -1237,6 +1250,28 @@ export default function OrderPage() {
                     : paymentMethod === "cash"
                       ? "💳 Thanh toán tiền mặt"
                       : "💳 Đã thanh toán"}
+                </button>
+              )}
+
+              {/* Nút In tem dán ly (Chỉ hiển thị khi tính năng Xuất mã vạch BẬT) */}
+              {localStorage.getItem("barcodeEnabled") !== "false" && (cart.length > 0 || hasExistingOrder) && (
+                <button
+                  onClick={() => {
+                    const allItems = [
+                      ...(existingOrder?.items || []),
+                      ...cart.map(mapCartItemToOrderItem),
+                    ];
+                    import("../utils/stickerPrint").then((m) => {
+                      m.printCupStickers(
+                        { id: existingOrder?.id || `ORD${Date.now().toString().slice(-6)}`, items: allItems, tableName: selectedTable?.name || `Bàn ${decodedTableId}` },
+                        { number: selectedTable?.name || `Bàn ${decodedTableId}` },
+                        storeInfo
+                      );
+                    });
+                  }}
+                  className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-2xl font-bold text-sm transition mb-3 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                >
+                  🏷️ In tem dán ly
                 </button>
               )}
 
@@ -1893,6 +1928,31 @@ export default function OrderPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {/* Thanh tổng kết giỏ hàng nổi cho Mobile (< lg) */}
+      {(cart.length > 0 || hasExistingOrder) && (
+        <div className="fixed bottom-3 left-3 right-3 lg:hidden z-40 bg-slate-900/95 backdrop-blur-md text-white rounded-3xl p-3.5 shadow-2xl flex items-center justify-between border border-slate-700 animate-fade-in">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm">🛒 Giỏ hàng</span>
+              <span className="bg-blue-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
+                {cart.reduce((sum, i) => sum + i.quantity, 0)} món
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 font-bold mt-0.5">
+              {formatCurrency(subtotal)}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              const el = document.getElementById("cart-section");
+              if (el) el.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-2xl transition active:scale-95 shadow-sm cursor-pointer"
+          >
+            Xem giỏ hàng &rarr;
+          </button>
         </div>
       )}
     </div>

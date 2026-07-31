@@ -36,7 +36,7 @@ function getAllDataForCache() {
           orders: getOrders({ limit: 100 }),
           tables: getAllTables(),
           discounts: getCoupons(false),
-          payments: firestoreQuery_("payments") || [],
+          payments: firestoreQuery_("payments", { limit: 200 }) || [],
           shifts: getShifts(),
           orderDetails: [], // Order items embedded inside orders
         };

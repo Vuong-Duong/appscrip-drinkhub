@@ -30,23 +30,25 @@ export default function FeatureGridMain() {
   });
 
   return (
-    <div className="mt-8">
-      <div className="grid grid-cols-4 gap-4">
+    <div className="mt-4 sm:mt-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
         {visibleFeatures.map((item) => (
           <button
             key={item.num}
             onClick={() => navigate(item.route)}
-            className="bg-white border border-gray-200 hover:border-blue-300 hover:shadow-md rounded-2xl px-6 py-4 transition-all cursor-pointer group text-left"
+            className="bg-white border border-gray-200 hover:border-blue-400 hover:shadow-md rounded-2xl p-3 sm:p-5 transition-all cursor-pointer group text-left active:scale-95 shadow-xs"
           >
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 flex items-center justify-center text-4xl bg-gray-100 group-hover:bg-blue-50 rounded-2xl transition">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-10 h-10 sm:w-14 sm:h-14 shrink-0 flex items-center justify-center text-2xl sm:text-3xl bg-blue-50/70 group-hover:bg-blue-100 rounded-2xl transition">
                 {item.icon}
               </div>
 
-              <div className="flex-1">
-                <p className="text-sm text-gray-400 font-medium">Tính năng</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] sm:text-xs text-gray-400 font-semibold uppercase tracking-wider hidden sm:block">
+                  Tính năng
+                </p>
 
-                <p className="font-semibold text-gray-800 text-base leading-snug mt-1">
+                <p className="font-bold text-gray-800 text-xs sm:text-base leading-tight mt-0.5 group-hover:text-blue-600 line-clamp-2">
                   {item.title}
                 </p>
               </div>
