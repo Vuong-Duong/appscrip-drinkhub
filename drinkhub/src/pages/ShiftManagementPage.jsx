@@ -117,6 +117,32 @@ export default function ShiftManagementPage() {
     );
   };
 
+  const getShiftOpeningCash = (shift) => {
+    const val = shift.actualOpeningCash ?? shift.openingCash ?? 0;
+    const num = Number(val);
+    return isNaN(num) ? 0 : num;
+  };
+
+  const getShiftRevenue = (shift, allOrders = []) => {
+    if (shift.totalRevenue !== undefined && shift.totalRevenue !== null && !isNaN(Number(shift.totalRevenue))) {
+      return Number(shift.totalRevenue);
+    }
+    if (shift.revenue !== undefined && shift.revenue !== null && !isNaN(Number(shift.revenue))) {
+      return Number(shift.revenue);
+    }
+    const startTime = new Date(shift.startTime || 0).getTime();
+    const endTime = shift.endTime ? new Date(shift.endTime).getTime() : Date.now() + 86400000;
+
+    let total = 0;
+    allOrders.forEach((o) => {
+      const orderTime = new Date(o.createdAt || o.paidAt || 0).getTime();
+      if (orderTime >= startTime && orderTime <= endTime && o.status !== "CANCELLED") {
+        total += Number(o.grandTotal || o.total || 0);
+      }
+    });
+    return total;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
@@ -164,9 +190,9 @@ export default function ShiftManagementPage() {
         <div className="flex items-center gap-3 mb-6">
           <button
             onClick={() => setActiveTab("open")}
-            className={`px-6 py-3 rounded-2xl font-bold transition-all ${
+            className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all cursor-pointer ${
               activeTab === "open"
-                ? "bg-blue-600 text-white shadow-md"
+                ? "bg-blue-600 text-white shadow-md shadow-blue-200"
                 : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
             }`}
           >
@@ -174,9 +200,9 @@ export default function ShiftManagementPage() {
           </button>
           <button
             onClick={() => setActiveTab("closed")}
-            className={`px-6 py-3 rounded-2xl font-bold transition-all ${
+            className={`px-6 py-3 rounded-2xl font-bold text-sm transition-all cursor-pointer ${
               activeTab === "closed"
-                ? "bg-blue-600 text-white shadow-md"
+                ? "bg-blue-600 text-white shadow-md shadow-blue-200"
                 : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
             }`}
           >
@@ -226,7 +252,7 @@ export default function ShiftManagementPage() {
               <button
                 key={shift.id}
                 onClick={() => navigate(`/shift/${shift.id}`)}
-                className="bg-white rounded-3xl p-6 shadow-sm hover:shadow-md border border-gray-200 transition-all text-left active:scale-95"
+                className="bg-white rounded-3xl p-6 shadow-sm hover:shadow-md border border-gray-200 transition-all text-left active:scale-95 cursor-pointer"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
@@ -260,21 +286,21 @@ export default function ShiftManagementPage() {
                   <div>
                     <p className="text-xs text-gray-500">Tiền mở ca</p>
                     <p className="text-base font-bold text-emerald-600">
-                      {formatCurrency(shift.openingCash)}
+                      {formatCurrency(getShiftOpeningCash(shift))}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-500">Doanh thu</p>
                     <p className="text-base font-bold text-blue-600">
-                      {formatCurrency(shift.totalRevenue)}
+                      {formatCurrency(getShiftRevenue(shift, storeState.orders))}
                     </p>
                   </div>
                   {shift.status === "closed" && (
                     <>
                       <div>
-                        <p className="text-xs text-gray-500">💵 Tiền mặt</p>
+                        <p className="text-xs text-gray-500">💵 Tiền két đóng ca</p>
                         <p className="text-base font-bold text-orange-600">
-                          {formatCurrency(shift.cashAmount || 0)}
+                          {formatCurrency(shift.actualClosingCash ?? shift.cashAmount ?? 0)}
                         </p>
                       </div>
                       <div>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal";
 import { formatCurrency, formatDate } from "../utils/helpers";
 import { printReceipt } from "../utils/receipt";
 import appStore from "../services/AppStore";
@@ -25,9 +26,18 @@ export default function OrderHistoryPage() {
     item: "",
     orderCode: "",
     paymentMethod: "",
+    fromDate: "",
+    toDate: "",
   });
   const [storeState, setStoreState] = useState(appStore.getState());
   const [error, setError] = useState("");
+
+  // Delete Confirmation Modal & Toast state
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
   const [deletingId, setDeletingId] = useState(null);
 
   const storeInfo = storeState.settings || {};
@@ -40,24 +50,62 @@ export default function OrderHistoryPage() {
     return unsubscribe;
   }, []);
 
+  const ensureArray = (val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    if (typeof val === "string") {
+      try {
+        return ensureArray(JSON.parse(val));
+      } catch (e) {
+        return [];
+      }
+    }
+    if (typeof val === "object") {
+      const vals = Object.values(val);
+      if (vals.length > 0 && (vals[0]?.productName || vals[0]?.name || vals[0]?.productId || vals[0]?.id)) {
+        return vals;
+      }
+    }
+    return [];
+  };
+
+  const tableNameMap = useMemo(() => {
+    const map = {};
+    const tablesList = storeState.tables || [];
+    tablesList.forEach((t) => {
+      if (t.id) {
+        map[String(t.id)] = t.name || `Bàn ${t.id}`;
+      }
+    });
+    return map;
+  }, [storeState.tables]);
+
   const orders = useMemo(() => {
-    const allOrders = storeState.orders || [];
+    const allOrders = (storeState.orders || []).filter((o) => o.status !== "DELETED");
     const allDetails = storeState.orderDetails || [];
 
     return allOrders
       .map((order) => {
-        const items = allDetails.filter((d) => d.orderId === order.id);
-        const orderItems = order.items && order.items.length > 0 ? order.items : items;
+        const parsedItems = ensureArray(order.items);
+        const detailItems = allDetails.filter((d) => String(d.orderId) === String(order.id));
+        const orderItems = parsedItems.length > 0 ? parsedItems : detailItems;
+
+        const resolvedTableName =
+          order.tableName ||
+          tableNameMap[String(order.tableId || "")] ||
+          (order.tableId ? (String(order.tableId).startsWith("Bàn") ? order.tableId : `Bàn ${order.tableId}`) : "Khách mang đi");
+
         return {
           ...order,
+          tableName: resolvedTableName,
           items: orderItems,
         };
       })
       .sort(
         (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
       );
-  }, [storeState.orders, storeState.orderDetails]);
+  }, [storeState.orders, storeState.orderDetails, tableNameMap]);
 
   const isLoading = storeState.loading;
 
@@ -65,13 +113,16 @@ export default function OrderHistoryPage() {
     const receiptData = {
       id: order.id,
       items: (order.items || []).map((item) => ({
-        name: item.productName,
-        quantity: item.quantity,
-        price: item.unitPrice,
-        total: item.subtotal,
+        name: item.productName || item.name || "Món không tên",
+        quantity: item.quantity || 1,
+        price: item.unitPrice ?? item.price ?? 0,
+        total: item.subtotal ?? item.total ?? 0,
+        toppings: item.toppings || [],
+        notes: item.notes || [],
+        customNote: item.customNote || "",
       })),
-      subtotal: order.subtotal,
-      discount: order.discount,
+      subtotal: order.subtotal || order.grandTotal,
+      discount: order.discount || 0,
       tax: 0,
       total: order.grandTotal,
       createdBy: order.createdBy,
@@ -93,24 +144,33 @@ export default function OrderHistoryPage() {
     printReceipt(receiptData, tableData, restaurantData, type);
   };
 
-  const handleDeleteOrder = async (orderId) => {
+  const promptDeleteOrder = (orderId) => {
     if (!isAdmin) {
       alert("Chỉ tài khoản Admin/Owner mới có quyền xóa đơn hàng!");
       return;
     }
+    setDeleteTargetId(orderId);
+    setDeleteError("");
+    setIsDeleteModalOpen(true);
+  };
 
-    if (!window.confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN đơn hàng ${orderId}?\n\nLưu ý: Thao tác này không thể hoàn tác và báo cáo doanh thu sẽ được cập nhật tự động.`)) {
-      return;
-    }
-
+  const handleConfirmDeleteOrder = async () => {
+    if (!deleteTargetId || isDeleting) return;
     try {
-      setDeletingId(orderId);
-      setError("");
-      await orderApi.deleteOrder(orderId);
+      setIsDeleting(true);
+      setDeleteError("");
+
+      await orderApi.deleteOrder(deleteTargetId);
+
+      setToastMessage("Xóa thành công.");
+      setIsDeleteModalOpen(false);
+      setDeleteTargetId(null);
+      setTimeout(() => setToastMessage(""), 3000);
     } catch (err) {
-      setError(err.message || "Xóa đơn hàng thất bại!");
+      console.error("Delete order error:", err);
+      setDeleteError(err.message || "Không thể xóa dữ liệu.");
     } finally {
-      setDeletingId(null);
+      setIsDeleting(false);
     }
   };
 
@@ -124,7 +184,7 @@ export default function OrderHistoryPage() {
 
   const tableOptions = useMemo(
     () =>
-      Array.from(new Set(orders.map((order) => order.tableId).filter(Boolean))),
+      Array.from(new Set(orders.map((order) => order.tableName).filter(Boolean))),
     [orders],
   );
 
@@ -134,7 +194,7 @@ export default function OrderHistoryPage() {
     const hasItem =
       !itemKeyword ||
       order.items?.some((item) =>
-        String(item.productName || "")
+        String(item.productName || item.name || "")
           .toLowerCase()
           .includes(itemKeyword),
       );
@@ -144,13 +204,31 @@ export default function OrderHistoryPage() {
         ? order.paymentMethod === "transfer"
         : order.paymentMethod !== "transfer");
 
+    let matchesDateRange = true;
+    if (order.createdAt) {
+      const orderDate = new Date(order.createdAt);
+      if (!isNaN(orderDate.getTime())) {
+        if (filter.fromDate) {
+          const start = new Date(filter.fromDate);
+          start.setHours(0, 0, 0, 0);
+          if (orderDate < start) matchesDateRange = false;
+        }
+        if (filter.toDate) {
+          const end = new Date(filter.toDate);
+          end.setHours(23, 59, 59, 999);
+          if (orderDate > end) matchesDateRange = false;
+        }
+      }
+    }
+
     return (
       (!filter.staff || order.createdBy === filter.staff) &&
-      (!filter.table || String(order.tableId) === String(filter.table)) &&
+      (!filter.table || String(order.tableName) === String(filter.table) || String(order.tableId) === String(filter.table)) &&
       (!orderKeyword ||
         String(order.id).toLowerCase().includes(orderKeyword)) &&
       hasItem &&
-      matchesPayment
+      matchesPayment &&
+      matchesDateRange
     );
   });
 
@@ -170,18 +248,35 @@ export default function OrderHistoryPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm p-5 mb-6">
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-4 items-end">
             <div>
-              <p className="text-sm text-gray-500 mb-1">Hôm nay</p>
-              <div className="bg-gray-100 text-gray-700 px-5 py-2.5 rounded-xl font-medium">
-                {formatDate(new Date())}
-              </div>
+              <p className="text-sm font-medium text-gray-500 mb-1">Từ ngày</p>
+              <input
+                type="date"
+                value={filter.fromDate}
+                onChange={(e) =>
+                  setFilter({ ...filter, fromDate: e.target.value })
+                }
+                className="border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:border-blue-500 font-medium"
+              />
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-gray-500 mb-1">Đến ngày</p>
+              <input
+                type="date"
+                value={filter.toDate}
+                onChange={(e) =>
+                  setFilter({ ...filter, toDate: e.target.value })
+                }
+                className="border rounded-xl px-3.5 py-2 text-sm bg-white focus:outline-none focus:border-blue-500 font-medium"
+              />
             </div>
 
             <div>
               <p className="text-sm text-gray-500 mb-1">Nhân viên</p>
               <select
-                className="border rounded-xl px-4 py-2.5 w-40 focus:outline-none focus:border-blue-500"
+                className="border rounded-xl px-4 py-2 w-36 text-sm focus:outline-none focus:border-blue-500"
                 value={filter.staff}
                 onChange={(e) =>
                   setFilter({ ...filter, staff: e.target.value })
@@ -199,7 +294,7 @@ export default function OrderHistoryPage() {
             <div>
               <p className="text-sm text-gray-500 mb-1">Bàn</p>
               <select
-                className="border rounded-xl px-4 py-2.5 w-32 focus:outline-none focus:border-blue-500"
+                className="border rounded-xl px-4 py-2 w-28 text-sm focus:outline-none focus:border-blue-500"
                 value={filter.table}
                 onChange={(e) =>
                   setFilter({ ...filter, table: e.target.value })
@@ -220,7 +315,7 @@ export default function OrderHistoryPage() {
                 type="text"
                 value={filter.item}
                 placeholder="Tìm món..."
-                className="border rounded-xl px-4 py-2.5 w-52 focus:outline-none focus:border-blue-500"
+                className="border rounded-xl px-4 py-2 w-44 text-sm focus:outline-none focus:border-blue-500"
                 onChange={(e) => setFilter({ ...filter, item: e.target.value })}
               />
             </div>
@@ -231,7 +326,7 @@ export default function OrderHistoryPage() {
                 type="text"
                 value={filter.orderCode}
                 placeholder="Nhập mã..."
-                className="border rounded-xl px-4 py-2.5 w-52 focus:outline-none focus:border-blue-500"
+                className="border rounded-xl px-4 py-2 w-44 text-sm focus:outline-none focus:border-blue-500"
                 onChange={(e) =>
                   setFilter({ ...filter, orderCode: e.target.value })
                 }
@@ -240,7 +335,7 @@ export default function OrderHistoryPage() {
 
             <div>
               <p className="text-sm text-gray-500 mb-1">Thanh toán</p>
-              <div className="flex gap-2">
+              <div className="flex gap-1.5">
                 {[
                   { value: "cash", label: "💵 Tiền mặt" },
                   { value: "transfer", label: "📱 Chuyển khoản" },
@@ -254,7 +349,7 @@ export default function OrderHistoryPage() {
                           filter.paymentMethod === opt.value ? "" : opt.value,
                       })
                     }
-                    className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition ${
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border-2 transition cursor-pointer ${
                       filter.paymentMethod === opt.value
                         ? opt.value === "transfer"
                           ? "border-violet-500 bg-violet-50 text-violet-700"
@@ -267,6 +362,28 @@ export default function OrderHistoryPage() {
                 ))}
               </div>
             </div>
+
+            {(filter.fromDate || filter.toDate || filter.staff || filter.table || filter.item || filter.orderCode || filter.paymentMethod) && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFilter({
+                      staff: "",
+                      table: "",
+                      item: "",
+                      orderCode: "",
+                      paymentMethod: "",
+                      fromDate: "",
+                      toDate: "",
+                    })
+                  }
+                  className="px-3.5 py-2 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-xl transition cursor-pointer border border-red-200"
+                >
+                  ↺ Xóa bộ lọc
+                </button>
+              </div>
+            )}
           </div>
           {error && <p className="text-sm text-red-600 mt-4 font-bold">{error}</p>}
         </div>
@@ -291,7 +408,7 @@ export default function OrderHistoryPage() {
                         {order.id}
                       </span>
                       <span className="bg-gray-100 text-gray-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                        {order.tableId ? `Bàn ${order.tableId}` : "Mang về"}
+                        {order.tableName || (order.tableId ? `Bàn ${order.tableId}` : "Mang về")}
                       </span>
                       <span
                         className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
@@ -356,11 +473,11 @@ export default function OrderHistoryPage() {
                     {/* Nút XÓA ORDER CHỈ HÌNH THÀNH KHI DÙNG VỚI TÀI KHOẢN ADMIN */}
                     {isAdmin && (
                       <button
-                        onClick={() => handleDeleteOrder(order.id)}
-                        disabled={deletingId === order.id}
+                        onClick={() => promptDeleteOrder(order.id)}
+                        disabled={isDeleting && deleteTargetId === order.id}
                         className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer disabled:opacity-50"
                       >
-                        {deletingId === order.id ? "Đang xóa..." : "🗑️ Xóa Order"}
+                        🗑️ Xóa Order
                       </button>
                     )}
                   </div>
@@ -392,16 +509,44 @@ export default function OrderHistoryPage() {
                             className="hover:bg-gray-100/30 transition"
                           >
                             <td className="px-4 py-3 font-medium text-gray-800">
-                              {item.productName}
+                              <div>
+                                <p className="font-semibold text-gray-900">
+                                  {item.productName || item.name || item.title || "Món không tên"}
+                                </p>
+                                {Array.isArray(item.toppings) && item.toppings.length > 0 && (
+                                  <div className="text-xs text-blue-600 mt-0.5 space-y-0.5">
+                                    {item.toppings.map((t, i) => {
+                                      const topPrice = Number(t.price ?? t.unitPrice ?? 0);
+                                      const topQty = t.quantity || 1;
+                                      const topTotal = topPrice * topQty;
+                                      return (
+                                        <span key={i} className="mr-3 inline-block">
+                                          + {t.name || t.productName} (x{topQty})
+                                          {topPrice > 0 && (
+                                            <span className="font-semibold text-blue-700 ml-1">
+                                              (+{formatCurrency(topTotal)})
+                                            </span>
+                                          )}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {((Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote)) && (
+                                  <div className="text-xs text-amber-600 italic mt-0.5">
+                                    📝 {item.notes?.join(", ")} {item.customNote && `("${item.customNote}")`}
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-center font-bold text-gray-900">
-                              {item.quantity}
+                              {item.quantity || 1}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              {formatCurrency(item.unitPrice)}
+                              {formatCurrency(item.unitPrice ?? item.price ?? 0)}
                             </td>
                             <td className="px-4 py-3 text-right font-bold text-gray-900">
-                              {formatCurrency(item.subtotal)}
+                              {formatCurrency(item.subtotal ?? item.total ?? ((item.unitPrice || item.price || 0) * (item.quantity || 1)))}
                             </td>
                           </tr>
                         ))}
@@ -441,6 +586,31 @@ export default function OrderHistoryPage() {
           </div>
         )}
       </div>
+
+      {/* Confirmation Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setDeleteTargetId(null);
+            setDeleteError("");
+          }
+        }}
+        onConfirm={handleConfirmDeleteOrder}
+        title="Xác nhận xóa"
+        message="Bạn có chắc chắn muốn xóa mục này không? Hành động này không thể hoàn tác."
+        isLoading={isDeleting}
+        error={deleteError}
+      />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 z-50 animate-bounce text-sm font-bold border border-slate-700">
+          <span>✅</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }

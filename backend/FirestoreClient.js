@@ -697,6 +697,51 @@ function firestoreBatchWrite_(
 
 
 /* =========================================================
+ * LIST COLLECTION IDS
+ * ========================================================= */
+
+function firestoreListCollectionIds_(documentPath) {
+  const url = documentPath
+    ? getFirestoreDatabasePath_() + "/documents/" + documentPath + ":listCollectionIds"
+    : getFirestoreDocumentsPath_() + ":listCollectionIds";
+
+  try {
+    const response = firestoreRequest_("post", url, { pageSize: 100 });
+    if (response && Array.isArray(response.collectionIds)) {
+      return response.collectionIds;
+    }
+  } catch (e) {
+    console.warn("firestoreListCollectionIds_ warning:", e);
+  }
+  return [];
+}
+
+
+/* =========================================================
+ * CHUNKED BATCH DELETE
+ * ========================================================= */
+
+function firestoreChunkedBatchDelete_(deleteOperations) {
+  if (!Array.isArray(deleteOperations) || deleteOperations.length === 0) {
+    return 0;
+  }
+
+  const BATCH_SIZE = 400; // Chunk into max 400 writes per batch commit
+  let totalDeleted = 0;
+
+  for (let i = 0; i < deleteOperations.length; i += BATCH_SIZE) {
+    const chunk = deleteOperations.slice(i, i + BATCH_SIZE);
+    if (chunk.length > 0) {
+      firestoreBatchWrite_(chunk);
+      totalDeleted += chunk.length;
+    }
+  }
+
+  return totalDeleted;
+}
+
+
+/* =========================================================
  * DOCUMENT NAME
  * ========================================================= */
 

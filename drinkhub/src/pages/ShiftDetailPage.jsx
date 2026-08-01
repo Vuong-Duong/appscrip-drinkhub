@@ -15,6 +15,7 @@ export default function ShiftDetailPage() {
   const currentUser = getStoredAuthUser();
   const isAdmin = currentUser?.role === "admin";
 
+  const [storeState, setStoreState] = useState(appStore.getState());
   const [shift, setShift] = useState(null);
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,6 +38,7 @@ export default function ShiftDetailPage() {
 
   useEffect(() => {
     const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
       const foundShift = state.shifts.find((s) => s.id === decodedShiftId);
       setShift(foundShift || null);
       setOrders(Array.isArray(state.orders) ? state.orders : []);
@@ -59,6 +61,36 @@ export default function ShiftDetailPage() {
     return unsubscribe;
   }, [decodedShiftId, showCloseModal]);
 
+  const ensureArray = (val) => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    if (typeof val === "string") {
+      try {
+        return ensureArray(JSON.parse(val));
+      } catch (e) {
+        return [];
+      }
+    }
+    if (typeof val === "object") {
+      const vals = Object.values(val);
+      if (vals.length > 0 && (vals[0]?.productName || vals[0]?.name || vals[0]?.productId || vals[0]?.id)) {
+        return vals;
+      }
+    }
+    return [];
+  };
+
+  const tableNameMap = useMemo(() => {
+    const map = {};
+    const tablesList = storeState.tables || [];
+    tablesList.forEach((t) => {
+      if (t.id) {
+        map[String(t.id)] = t.name || `Bàn ${t.id}`;
+      }
+    });
+    return map;
+  }, [storeState.tables]);
+
   const shiftOrders = useMemo(() => {
     if (!shift || !shift.startTime) return [];
     const startTime = new Date(shift.startTime).getTime();
@@ -71,15 +103,22 @@ export default function ShiftDetailPage() {
         return orderTime >= startTime && orderTime <= endTime;
       })
       .map((o) => {
-        const detailItems = allDetails.filter((d) => d.orderId === o.id);
-        const items = Array.isArray(o.items) && o.items.length > 0 ? o.items : detailItems;
+        const parsedItems = ensureArray(o.items);
+        const detailItems = allDetails.filter((d) => String(d.orderId) === String(o.id));
+        const items = parsedItems.length > 0 ? parsedItems : detailItems;
+        const resolvedTableName =
+          o.tableName ||
+          tableNameMap[String(o.tableId || "")] ||
+          (o.tableId ? (String(o.tableId).startsWith("Bàn") ? o.tableId : `Bàn ${o.tableId}`) : "Khách mang đi");
+
         return {
           ...o,
+          tableName: resolvedTableName,
           items,
         };
       })
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }, [shift, orders, storeState?.orderDetails]);
+  }, [shift, orders, storeState?.orderDetails, tableNameMap]);
 
   // Handle Close Shift (Staff enters actual closing cash)
   const handleCloseShift = async () => {
@@ -546,7 +585,7 @@ export default function ShiftDetailPage() {
                           <div className="flex justify-between items-start">
                             <div className="flex-1">
                               <p className="font-semibold text-gray-900 text-sm">
-                                {item.productName || item.name}
+                                {item.productName || item.name || item.title || "Món không tên"}
                               </p>
                               <p className="text-xs text-gray-500">
                                 {item.quantity} x {formatCurrency(item.unitPrice || item.price || 0)}

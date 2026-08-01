@@ -323,6 +323,12 @@ export default function OrderPage() {
     if (!coupon) return "Mã giảm giá không tồn tại";
     if (coupon.status !== "ACTIVE") return "Mã giảm giá không còn hoạt động";
 
+    const usedCount = Number(coupon.usedCount || 0);
+    const usageLimit = coupon.usageLimit !== undefined && coupon.usageLimit !== null && coupon.usageLimit !== "" ? Number(coupon.usageLimit) : null;
+    if (usageLimit !== null && usageLimit > 0 && usedCount >= usageLimit) {
+      return "Mã giảm giá đã hết lượt sử dụng";
+    }
+
     if (coupon.expiresAt) {
       const isExpired =
         new Date(coupon.expiresAt) < new Date(new Date().setHours(0, 0, 0, 0));
@@ -338,7 +344,13 @@ export default function OrderPage() {
   };
 
   const activeDiscounts = useMemo(() => {
-    return (storeState.discounts || []).filter((c) => c.status === "ACTIVE");
+    return (storeState.discounts || []).filter((c) => {
+      if (c.status !== "ACTIVE") return false;
+      const usedCount = Number(c.usedCount || 0);
+      const usageLimit = c.usageLimit !== undefined && c.usageLimit !== null && c.usageLimit !== "" ? Number(c.usageLimit) : null;
+      if (usageLimit !== null && usageLimit > 0 && usedCount >= usageLimit) return false;
+      return true;
+    });
   }, [storeState.discounts]);
 
   useEffect(() => {
@@ -511,8 +523,10 @@ export default function OrderPage() {
       const tempOrder = {
         id: tempOrderId,
         tableId: decodedTableId,
+        tableName: selectedTable?.name || `Bàn ${decodedTableId}`,
         customerName: orderPayload.customerName,
         status: "OPEN",
+        items: orderPayload.items,
         subtotal: orderPayload.subtotal,
         discount: orderPayload.discount,
         grandTotal: orderPayload.grandTotal,
@@ -558,6 +572,25 @@ export default function OrderPage() {
           : p;
       });
       appStore.set("products", updatedProducts);
+
+      // Trigger local discount usage increment
+      if (appliedDiscountCode && safeDiscount > 0) {
+        const currentDiscounts = appStore.get("discounts") || [];
+        const updatedDiscounts = currentDiscounts.map((d) => {
+          if (String(d.code || "").toUpperCase() === String(appliedDiscountCode || "").toUpperCase()) {
+            const newUsed = Number(d.usedCount || 0) + 1;
+            const limit = d.usageLimit !== undefined && d.usageLimit !== null && d.usageLimit !== "" ? Number(d.usageLimit) : null;
+            const isExpired = limit !== null && limit > 0 && newUsed >= limit;
+            return {
+              ...d,
+              usedCount: newUsed,
+              status: isExpired ? "EXPIRED" : d.status,
+            };
+          }
+          return d;
+        });
+        appStore.set("discounts", updatedDiscounts);
+      }
 
       // Print slip immediately
       printCurrentCartReceipt(tempOrderId, true);

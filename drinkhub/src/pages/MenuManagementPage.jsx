@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import ImageInputField from "../components/ImageInputField";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal";
 import appStore from "../services/AppStore";
 import CrudService from "../services/CrudService";
+import { productApi } from "../api/Api";
 import { getStoredAuthUser } from "../utils/auth";
 import { formatCurrency, getDirectImageUrl } from "../utils/helpers";
 
@@ -28,6 +30,13 @@ export default function MenuManagementPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState("");
 
+  // Confirmation Delete Modal & Toast State
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
+
   useEffect(() => {
     const unsubscribe = appStore.subscribe((state) => {
       setStoreState({ ...state });
@@ -35,7 +44,7 @@ export default function MenuManagementPage() {
     return unsubscribe;
   }, []);
 
-  const products = storeState.products || [];
+  const products = (storeState.products || []).filter((p) => p.status !== "DELETED");
   const isLoading = storeState.loading;
   const pendingSyncs = storeState.syncPending || [];
 
@@ -145,11 +154,12 @@ export default function MenuManagementPage() {
     };
 
     try {
+      const nowIso = new Date().toISOString();
       if (editingId) {
-        const updated = { ...payload, id: editingId };
+        const updated = { ...payload, id: editingId, updatedAt: nowIso };
         await CrudService.update("products", updated);
       } else {
-        const created = { ...payload, id: `prod-${Date.now()}` };
+        const created = { ...payload, id: `prod-${Date.now()}`, createdAt: nowIso, updatedAt: nowIso };
         await CrudService.create("products", created);
       }
       setIsModalOpen(false);
@@ -159,14 +169,29 @@ export default function MenuManagementPage() {
     }
   };
 
-  const handleDelete = async (productId) => {
-    if (!window.confirm("Xoá sản phẩm này?")) return;
+  const promptDeleteProduct = (productId) => {
+    setDeleteTargetId(productId);
+    setDeleteError("");
+    setIsDeleteModalOpen(true);
+  };
 
+  const handleConfirmDeleteProduct = async () => {
+    if (!deleteTargetId || isDeleting) return;
     try {
-      await CrudService.delete("products", productId);
-      alert("Xoá sản phẩm thành công!");
+      setIsDeleting(true);
+      setDeleteError("");
+
+      await productApi.deleteProduct(deleteTargetId, user?.role);
+
+      setToastMessage("Xóa thành công.");
+      setIsDeleteModalOpen(false);
+      setDeleteTargetId(null);
+      setTimeout(() => setToastMessage(""), 3000);
     } catch (err) {
-      setError(err.message || "Xoá sản phẩm thất bại");
+      console.error("Delete product failed:", err);
+      setDeleteError(err.message || "Không thể xóa dữ liệu.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -289,8 +314,8 @@ export default function MenuManagementPage() {
                       Sửa
                     </button>
                     <button
-                      onClick={() => handleDelete(product.id)}
-                      className="flex-1 py-1.5 sm:py-2 rounded-lg bg-red-50 text-red-700 font-medium text-xs sm:text-sm"
+                      onClick={() => promptDeleteProduct(product.id)}
+                      className="flex-1 py-1.5 sm:py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-semibold text-xs sm:text-sm cursor-pointer transition"
                     >
                       Xoá
                     </button>
@@ -413,18 +438,43 @@ export default function MenuManagementPage() {
                   setIsModalOpen(false);
                   setError("");
                 }}
-                className="px-5 py-3 rounded-xl bg-gray-100"
+                className="px-5 py-3 rounded-xl bg-gray-100 cursor-pointer"
               >
                 Huỷ
               </button>
               <button
                 type="submit"
-                className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+                className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold cursor-pointer"
               >
                 Lưu
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Confirmation Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setDeleteTargetId(null);
+            setDeleteError("");
+          }
+        }}
+        onConfirm={handleConfirmDeleteProduct}
+        title="Xác nhận xóa"
+        message="Bạn có chắc chắn muốn xóa sản phẩm này không? Hành động này không thể hoàn tác."
+        isLoading={isDeleting}
+        error={deleteError}
+      />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 z-50 animate-bounce text-sm font-bold border border-slate-700">
+          <span>✅</span>
+          <span>{toastMessage}</span>
         </div>
       )}
     </div>

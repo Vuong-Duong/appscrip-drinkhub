@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
+import ConfirmDeleteModal from "../components/ConfirmDeleteModal";
 import appStore from "../services/AppStore";
 import CrudService from "../services/CrudService";
+import { discountApi } from "../api/Api";
 import { getStoredAuthUser } from "../utils/auth";
 import { formatCurrency } from "../utils/helpers";
 
@@ -12,6 +14,8 @@ const emptyDiscount = {
   value: "",
   minOrderValue: "",
   maxDiscount: "",
+  usageLimit: "",
+  usedCount: 0,
   status: "ACTIVE",
   expiresAt: "",
 };
@@ -25,6 +29,13 @@ export default function DiscountManagementPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState("");
 
+  // Confirmation Delete Modal & Toast State
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
+
   useEffect(() => {
     const unsubscribe = appStore.subscribe((state) => {
       setStoreState({ ...state });
@@ -33,7 +44,7 @@ export default function DiscountManagementPage() {
   }, []);
 
   const discounts = useMemo(() => {
-    const raw = storeState.discounts || [];
+    const raw = (storeState.discounts || []).filter((d) => d.status !== "DELETED");
     return [...raw].sort((a, b) => {
       const timeA = new Date(a.createdAt || a.updatedAt || 0).getTime();
       const timeB = new Date(b.createdAt || b.updatedAt || 0).getTime();
@@ -67,6 +78,11 @@ export default function DiscountManagementPage() {
         discount.maxDiscount !== undefined && discount.maxDiscount !== null
           ? discount.maxDiscount
           : "",
+      usageLimit:
+        discount.usageLimit !== undefined && discount.usageLimit !== null
+          ? discount.usageLimit
+          : "",
+      usedCount: discount.usedCount || 0,
       status: discount.status || "ACTIVE",
       expiresAt: discount.expiresAt || "",
     });
@@ -89,6 +105,11 @@ export default function DiscountManagementPage() {
     const maxDiscountStr = String(
       form.maxDiscount !== undefined && form.maxDiscount !== null
         ? form.maxDiscount
+        : "",
+    ).trim();
+    const usageLimitStr = String(
+      form.usageLimit !== undefined && form.usageLimit !== null
+        ? form.usageLimit
         : "",
     ).trim();
 
@@ -121,22 +142,40 @@ export default function DiscountManagementPage() {
       return;
     }
 
+    const expiresAtStr = (form.expiresAt || "").trim();
+    if (!expiresAtStr) {
+      setError("Vui lòng chọn ngày hết hạn (không được để trống)");
+      return;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(expiresAtStr);
+
+    if (isNaN(selectedDate.getTime()) || selectedDate < today) {
+      setError("Ngày hết hạn không được là ngày trong quá khứ");
+      return;
+    }
+
     const payload = {
       code: trimmedCode,
       type: form.type,
       value: parseInt(valueStr, 10) || 0,
       minOrderValue: parseInt(minOrderValueStr, 10) || 0,
       maxDiscount: parseInt(maxDiscountStr, 10) || 0,
+      usageLimit: usageLimitStr !== "" ? (parseInt(usageLimitStr, 10) || 0) : null,
+      usedCount: Number(form.usedCount || 0),
       status: form.status,
       expiresAt: (form.expiresAt || "").trim(),
     };
 
     try {
+      const nowIso = new Date().toISOString();
       if (editingId) {
-        const updated = { ...payload, id: editingId };
+        const updated = { ...payload, id: editingId, updatedAt: nowIso };
         await CrudService.update("discounts", updated);
       } else {
-        const created = { ...payload, id: `discount-${Date.now()}` };
+        const created = { ...payload, id: `discount-${Date.now()}`, createdAt: nowIso, updatedAt: nowIso };
         await CrudService.create("discounts", created);
       }
       setIsModalOpen(false);
@@ -146,13 +185,29 @@ export default function DiscountManagementPage() {
     }
   };
 
-  const handleDelete = async (discountId) => {
-    if (!window.confirm("Xoá mã giảm giá này?")) return;
+  const promptDeleteDiscount = (discountId) => {
+    setDeleteTargetId(discountId);
+    setDeleteError("");
+    setIsDeleteModalOpen(true);
+  };
 
+  const handleConfirmDeleteDiscount = async () => {
+    if (!deleteTargetId || isDeleting) return;
     try {
-      await CrudService.delete("discounts", discountId);
+      setIsDeleting(true);
+      setDeleteError("");
+
+      await discountApi.deleteDiscount(deleteTargetId, user?.role);
+
+      setToastMessage("Xóa thành công.");
+      setIsDeleteModalOpen(false);
+      setDeleteTargetId(null);
+      setTimeout(() => setToastMessage(""), 3000);
     } catch (err) {
-      setError(err.message || "Xoá mã giảm giá thất bại");
+      console.error("Delete discount error:", err);
+      setDeleteError(err.message || "Không thể xóa dữ liệu.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -160,6 +215,16 @@ export default function DiscountManagementPage() {
     discount.type === "percent"
       ? `${discount.value}%`
       : formatCurrency(discount.value);
+
+  const formatExpiryDate = (val) => {
+    if (!val) return "Không thời hạn";
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return String(val);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -175,51 +240,73 @@ export default function DiscountManagementPage() {
               &larr;
             </button>
             <div>
-              <h1 className="text-lg sm:text-2xl font-bold text-gray-900">
+              <h1 className="text-xl sm:text-3xl font-bold text-gray-900">
                 Quản lý Chương trình
               </h1>
-              <p className="text-xs sm:text-sm text-gray-500">
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
                 Quản lý mã giảm giá
               </p>
             </div>
           </div>
           <button
             onClick={openCreateModal}
-            className="px-3 sm:px-5 py-2 sm:py-3 rounded-lg sm:rounded-xl bg-blue-600 text-white font-semibold text-sm sm:text-base hover:bg-blue-700 whitespace-nowrap"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 sm:px-5 py-2.5 rounded-xl shadow-md transition"
           >
-            Thêm mã giảm giá
+            + Thêm mã mới
           </button>
         </div>
 
-        {error && <div className="mb-4 text-red-600">{error}</div>}
+        {error && (
+          <div className="bg-red-50 text-red-700 p-4 rounded-xl mb-6 font-medium">
+            {error}
+          </div>
+        )}
 
         {isLoading ? (
-          <div className="text-center py-16 text-gray-500">Đang tải...</div>
+          <div className="text-center py-20 text-gray-500">
+            Đang tải mã giảm giá...
+          </div>
+        ) : discounts.length === 0 ? (
+          <div className="text-center py-20 text-gray-500">
+            Chưa có mã giảm giá nào
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-            {discounts
-              .filter((item) => item.status !== "DELETED")
-              .map((discount) => (
-                <div
-                  key={discount.id}
-                  className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+            {discounts.map((discount) => (
+              <div
+                key={discount.id}
+                className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-start justify-between">
                     <div>
-                      <p className="text-sm text-gray-400">Code</p>
+                      <p className="text-xs text-gray-400 font-medium">Code</p>
                       <h3 className="font-mono text-2xl font-bold text-blue-700">
                         {discount.code}
                       </h3>
                     </div>
-                    <span className="text-xs px-2 py-1 rounded-full bg-gray-100">
-                      {discount.status}
-                    </span>
+                    {(() => {
+                      const isUsedUp = discount.usageLimit !== undefined && discount.usageLimit !== null && discount.usageLimit !== "" && Number(discount.usedCount || 0) >= Number(discount.usageLimit);
+                      return (
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${
+                          isUsedUp
+                            ? "bg-amber-100 text-amber-800"
+                            : discount.status === "ACTIVE"
+                            ? "bg-green-100 text-green-800"
+                            : "bg-gray-100 text-gray-700"
+                        }`}>
+                          {isUsedUp ? "HẾT LƯỢT" : discount.status}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-sm mt-5">
                     <div>
                       <p className="text-gray-400">Loại</p>
-                      <p className="font-semibold">{discount.type}</p>
+                      <p className="font-semibold">
+                        {discount.type === "percent" ? "Phần trăm (%)" : "Số tiền (đ)"}
+                      </p>
                     </div>
                     <div>
                       <p className="text-gray-400">Giá trị</p>
@@ -239,10 +326,18 @@ export default function DiscountManagementPage() {
                         {formatCurrency(discount.maxDiscount)}
                       </p>
                     </div>
-                    <div className="col-span-2">
+                    <div>
+                      <p className="text-gray-400">Số lượng phát hành</p>
+                      <p className="font-semibold text-blue-700">
+                        {discount.usageLimit !== undefined && discount.usageLimit !== null && discount.usageLimit !== ""
+                          ? `${discount.usedCount || 0} / ${discount.usageLimit} lượt`
+                          : "Không giới hạn"}
+                      </p>
+                    </div>
+                    <div>
                       <p className="text-gray-400">Hết hạn</p>
-                      <p className="font-semibold">
-                        {discount.expiresAt || "--"}
+                      <p className="font-semibold text-gray-800">
+                        {formatExpiryDate(discount.expiresAt)}
                       </p>
                     </div>
                   </div>
@@ -250,18 +345,19 @@ export default function DiscountManagementPage() {
                   <div className="flex gap-2 mt-5">
                     <button
                       onClick={() => openEditModal(discount)}
-                      className="flex-1 py-2 rounded-xl bg-blue-50 text-blue-700 font-medium"
+                      className="flex-1 py-2 rounded-xl bg-blue-50 text-blue-700 font-medium hover:bg-blue-100 transition cursor-pointer"
                     >
                       Sửa
                     </button>
                     <button
-                      onClick={() => handleDelete(discount.id)}
-                      className="flex-1 py-2 rounded-xl bg-red-50 text-red-700 font-medium"
+                      onClick={() => promptDeleteDiscount(discount.id)}
+                      className="flex-1 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 font-semibold cursor-pointer transition"
                     >
                       Xoá
                     </button>
                   </div>
                 </div>
+              </div>
               ))}
           </div>
         )}
@@ -303,8 +399,8 @@ export default function DiscountManagementPage() {
                   value={form.type}
                   onChange={(e) => setForm({ ...form, type: e.target.value })}
                 >
-                  <option value="fixed">fixed</option>
-                  <option value="percent">percent</option>
+                  <option value="fixed">Giảm theo số tiền</option>
+                  <option value="percent">Giảm theo phần trăm</option>
                 </select>
               </label>
               <label className="space-y-1">
@@ -349,6 +445,21 @@ export default function DiscountManagementPage() {
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-gray-600">
+                  Số lượng phát hành (Lượt dùng)
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  className="w-full border rounded-xl px-4 py-3"
+                  placeholder="Để trống nếu không giới hạn"
+                  value={form.usageLimit}
+                  onChange={(e) =>
+                    setForm({ ...form, usageLimit: e.target.value })
+                  }
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-gray-600">
                   Trạng thái
                 </span>
                 <select
@@ -361,11 +472,14 @@ export default function DiscountManagementPage() {
                 </select>
               </label>
               <label className="space-y-1 col-span-2">
-                <span className="text-sm font-medium text-gray-600">
-                  Ngày hết hạn
+                <span className="text-sm font-medium text-gray-600 flex items-center gap-1">
+                  <span>Ngày hết hạn</span>
+                  <span className="text-red-500 font-bold">*</span>
                 </span>
                 <input
                   type="date"
+                  required
+                  min={new Date().toISOString().split("T")[0]}
                   className="w-full border rounded-xl px-4 py-3"
                   value={form.expiresAt}
                   onChange={(e) =>
@@ -381,18 +495,43 @@ export default function DiscountManagementPage() {
                   setIsModalOpen(false);
                   setError("");
                 }}
-                className="px-5 py-3 rounded-xl bg-gray-100"
+                className="px-5 py-3 rounded-xl bg-gray-100 cursor-pointer"
               >
                 Huỷ
               </button>
               <button
                 type="submit"
-                className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold"
+                className="px-5 py-3 rounded-xl bg-blue-600 text-white font-semibold cursor-pointer"
               >
                 Lưu
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Confirmation Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setDeleteTargetId(null);
+            setDeleteError("");
+          }
+        }}
+        onConfirm={handleConfirmDeleteDiscount}
+        title="Xác nhận xóa"
+        message="Bạn có chắc chắn muốn xóa mục này không? Hành động này không thể hoàn tác."
+        isLoading={isDeleting}
+        error={deleteError}
+      />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 bg-slate-900 text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3 z-50 animate-bounce text-sm font-bold border border-slate-700">
+          <span>✅</span>
+          <span>{toastMessage}</span>
         </div>
       )}
     </div>

@@ -12,6 +12,8 @@ function mapCouponDoc_(doc) {
     maxDiscount: toNumberSafe_(doc.maxDiscount),
     status: trimSafe_(doc.status).toUpperCase(),
     expiresAt: trimSafe_(doc.expiresAt),
+    usageLimit: doc.usageLimit !== undefined && doc.usageLimit !== null && doc.usageLimit !== "" ? toNumberSafe_(doc.usageLimit) : null,
+    usedCount: toNumberSafe_(doc.usedCount || 0),
   };
 }
 
@@ -25,14 +27,29 @@ function normalizeCouponPayload_(payload) {
     throw new Error("INVALID_COUPON_TYPE");
   }
 
+  const usageLimit = data.usageLimit !== undefined && data.usageLimit !== null && data.usageLimit !== "" ? toNumberSafe_(data.usageLimit) : null;
+  const expiresAt = trimSafe_(data.expiresAt);
+  if (!expiresAt) {
+    throw new Error("MISSING_FIELDS: expiresAt (Ngày hết hạn không được để trống)");
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expDate = new Date(expiresAt);
+  if (isNaN(expDate.getTime()) || expDate < today) {
+    throw new Error("INVALID_EXPIRES_AT: Ngày hết hạn không được là ngày trong quá khứ");
+  }
+
   return {
     code,
     type,
     value: toNumberSafe_(data.value),
     minOrderValue: toNumberSafe_(data.minOrderValue),
     maxDiscount: toNumberSafe_(data.maxDiscount),
+    usageLimit: usageLimit,
+    usedCount: toNumberSafe_(data.usedCount || 0),
     status: trimSafe_(data.status || "ACTIVE").toUpperCase(),
-    expiresAt: trimSafe_(data.expiresAt),
+    expiresAt: expiresAt,
   };
 }
 
@@ -44,7 +61,10 @@ function getCoupons(activeOnly) {
     const coupon = mapCouponDoc_(docs[i]);
     if (!coupon.id) continue;
     if (coupon.status === "DELETED") continue;
-    if (activeOnly && coupon.status !== "ACTIVE") continue;
+    if (activeOnly) {
+      if (coupon.status !== "ACTIVE") continue;
+      if (coupon.usageLimit !== null && coupon.usageLimit > 0 && coupon.usedCount >= coupon.usageLimit) continue;
+    }
     coupons.push(coupon);
   }
 
@@ -72,6 +92,8 @@ function createCoupon(payload) {
       value: data.value,
       minOrderValue: data.minOrderValue,
       maxDiscount: data.maxDiscount,
+      usageLimit: data.usageLimit,
+      usedCount: data.usedCount || 0,
       status: data.status,
       expiresAt: data.expiresAt,
       createdAt: now,
@@ -100,6 +122,10 @@ function updateCoupon(couponId, payload) {
     if (data.value !== undefined) updates.value = toNumberSafe_(data.value);
     if (data.minOrderValue !== undefined) updates.minOrderValue = toNumberSafe_(data.minOrderValue);
     if (data.maxDiscount !== undefined) updates.maxDiscount = toNumberSafe_(data.maxDiscount);
+    if (data.usageLimit !== undefined) {
+      updates.usageLimit = data.usageLimit !== null && data.usageLimit !== "" ? toNumberSafe_(data.usageLimit) : null;
+    }
+    if (data.usedCount !== undefined) updates.usedCount = toNumberSafe_(data.usedCount);
     if (data.status !== undefined) updates.status = trimSafe_(data.status).toUpperCase();
     if (data.expiresAt !== undefined) updates.expiresAt = trimSafe_(data.expiresAt);
     updates.updatedAt = toIsoString_(new Date());
@@ -111,6 +137,24 @@ function updateCoupon(couponId, payload) {
     pushDeltaSafe_("COUPON", "UPDATE", coupon);
     return coupon;
   });
+}
+
+function recordCouponUse_(discountId) {
+  if (!discountId) return;
+  try {
+    const existing = firestoreGet_("discounts", discountId);
+    if (existing) {
+      const newUsedCount = toNumberSafe_(existing.usedCount || 0) + 1;
+      const updates = { usedCount: newUsedCount, updatedAt: toIsoString_(new Date()) };
+      const limit = existing.usageLimit !== undefined && existing.usageLimit !== null && existing.usageLimit !== "" ? toNumberSafe_(existing.usageLimit) : null;
+      if (limit !== null && limit > 0 && newUsedCount >= limit) {
+        updates.status = "EXPIRED";
+      }
+      firestoreUpdate_("discounts", discountId, updates);
+    }
+  } catch (e) {
+    console.warn("recordCouponUse_ error:", e);
+  }
 }
 
 function deleteCoupon(couponId, payload) {

@@ -6,6 +6,8 @@ import { shiftApi } from "../api/Api";
 import { formatCurrency } from "../utils/helpers";
 import { getStoredAuthUser } from "../utils/auth";
 
+import appStore from "../services/AppStore";
+
 export default function ShiftReconciliationPage() {
   const navigate = useNavigate();
   const currentUser = getStoredAuthUser();
@@ -15,7 +17,7 @@ export default function ShiftReconciliationPage() {
   const [error, setError] = useState("");
 
   // Filters
-  const [range, setRange] = useState("today");
+  const [range, setRange] = useState("all");
   const [staffFilter, setStaffFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [customStart, setCustomStart] = useState("");
@@ -24,10 +26,90 @@ export default function ShiftReconciliationPage() {
   // Selected Detail Modal for Admin
   const [selectedShift, setSelectedShift] = useState(null);
 
+  // Tính toán đối chiếu két tiền từ dữ liệu AppStore
+  const calculateLocalReconciliations = () => {
+    const state = appStore.getState();
+    const shifts = Array.isArray(state.shifts) ? state.shifts : [];
+    const orders = Array.isArray(state.orders) ? state.orders : [];
+    const adjustments = Array.isArray(state.cashAdjustments) ? state.cashAdjustments : [];
+
+    return shifts
+      .map((shift) => {
+        const startTime = new Date(shift.startTime || shift.createdAt || 0).getTime();
+        const endTime = shift.endTime ? new Date(shift.endTime).getTime() : Date.now();
+
+        let totalCashOrders = 0;
+        let totalTransferOrders = 0;
+
+        orders.forEach((ord) => {
+          const ordTime = new Date(ord.createdAt || ord.paidAt || 0).getTime();
+          if (ordTime >= startTime && ordTime <= endTime) {
+            const amount = Number(ord.grandTotal || ord.total || 0);
+            const pMethod = String(ord.paymentMethod || "").toLowerCase();
+            if (pMethod === "transfer") {
+              totalTransferOrders += amount;
+            } else {
+              totalCashOrders += amount;
+            }
+          }
+        });
+
+        let cashAdjustments = 0;
+        const shiftAdjList = [];
+        adjustments.forEach((adj) => {
+          if (adj && String(adj.shiftId) === String(shift.id)) {
+            const amt = Number(adj.amount || 0);
+            cashAdjustments += amt;
+            shiftAdjList.push(adj);
+          }
+        });
+
+        const actualOpeningCash = Number(shift.actualOpeningCash ?? shift.openingCash ?? 0);
+        const actualClosingCash = Number(shift.actualClosingCash ?? shift.cashAmount ?? 0);
+        const expectedCash = actualOpeningCash + totalCashOrders + cashAdjustments;
+        const difference = actualClosingCash - expectedCash;
+
+        let reconStatus = "OPEN";
+        if (shift.status === "closed") {
+          if (difference < 0) reconStatus = "THIEU";
+          else if (difference === 0) reconStatus = "KHOP";
+          else reconStatus = "DU";
+        }
+
+        return {
+          id: shift.id,
+          staffName: shift.staffName || "Nhân viên",
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          status: shift.status,
+          actualOpeningCash,
+          totalCashOrders,
+          totalTransferOrders,
+          cashAdjustments,
+          adjustmentsList: shiftAdjList,
+          expectedCash,
+          actualClosingCash,
+          difference,
+          reconciliationStatus: reconStatus,
+        };
+      })
+      .filter((r) => {
+        if (staffFilter && r.staffName !== staffFilter) return false;
+        if (statusFilter && statusFilter !== "ALL" && r.reconciliationStatus !== statusFilter) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.endTime || b.startTime || 0).getTime() - new Date(a.endTime || a.startTime || 0).getTime());
+  };
+
   const fetchReconciliations = async () => {
     try {
       setLoading(true);
       setError("");
+
+      // Nạp dữ liệu từ AppStore trước
+      const localData = calculateLocalReconciliations();
+      setReconciliations(localData);
+
       const filters = {
         range,
         staffName: staffFilter,
@@ -36,14 +118,22 @@ export default function ShiftReconciliationPage() {
         customEnd: range === "custom" ? customEnd : null,
       };
       const data = await shiftApi.getReconciliation(filters);
-      const sortedData = (Array.isArray(data) ? data : []).sort((a, b) => {
-        const timeA = new Date(a.shiftEndTime || a.shiftStartTime || a.createdAt || 0).getTime();
-        const timeB = new Date(b.shiftEndTime || b.shiftStartTime || b.createdAt || 0).getTime();
-        return timeB - timeA;
-      });
-      setReconciliations(sortedData);
+      if (Array.isArray(data) && data.length > 0) {
+        const sortedData = data.sort((a, b) => {
+          const timeA = new Date(a.shiftEndTime || a.shiftStartTime || a.createdAt || 0).getTime();
+          const timeB = new Date(b.shiftEndTime || b.shiftStartTime || b.createdAt || 0).getTime();
+          return timeB - timeA;
+        });
+        setReconciliations(sortedData);
+      }
     } catch (err) {
-      setError(err.message || "Không thể tải dữ liệu đối chiếu tiền mặt ca");
+      console.warn("Server reconciliation fetch warning:", err);
+      // Giữ dữ liệu local nếu server trả về lỗi phái sinh
+      const localData = calculateLocalReconciliations();
+      setReconciliations(localData);
+      if (localData.length === 0) {
+        setError(err.message || "Không thể tải dữ liệu đối chiếu tiền mặt ca");
+      }
     } finally {
       setLoading(false);
     }
@@ -51,6 +141,13 @@ export default function ShiftReconciliationPage() {
 
   useEffect(() => {
     fetchReconciliations();
+
+    const unsubscribe = appStore.subscribe(() => {
+      const localData = calculateLocalReconciliations();
+      setReconciliations(localData);
+    });
+
+    return unsubscribe;
   }, [range, staffFilter, statusFilter, customStart, customEnd]);
 
   // Unique staff list for filter

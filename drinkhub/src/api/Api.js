@@ -625,8 +625,35 @@ function normalizeTable(table) {
  * ========================= */
 
 export const orderApi = {
-  createOrder(payload) {
-    return request("CREATE_ORDER", normalizeOrderPayload(payload));
+  async createOrder(payload) {
+    const normalized = normalizeOrderPayload(payload);
+    const newOrder = {
+      ...normalized,
+      id: normalized.id || `order-${Date.now()}`,
+      status: normalized.status || "OPEN",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 1. Instantly update AppStore & LocalStorage
+    appStore.add("orders", newOrder, true);
+    if (newOrder.tableId) {
+      appStore.update("tables", {
+        id: String(newOrder.tableId),
+        status: "occupied",
+      }, true);
+    }
+
+    try {
+      const serverResult = await request("CREATE_ORDER", normalized);
+      if (serverResult && serverResult.id) {
+        appStore.update("orders", serverResult, true);
+      }
+      return serverResult || newOrder;
+    } catch (err) {
+      console.warn("CREATE_ORDER API call error:", err);
+      return newOrder;
+    }
   },
 
   getOrders(filters = {}) {
@@ -639,10 +666,22 @@ export const orderApi = {
     });
   },
 
-  addItems(orderId, items, discount) {
+  async addItems(orderId, items, discount) {
+    const normItems = normalizeOrderPayload({ items }).items;
+    const orders = appStore.get("orders") || [];
+    const existing = orders.find((o) => String(o.id) === String(orderId));
+    if (existing) {
+      const updatedItems = [...(existing.items || []), ...normItems];
+      appStore.update("orders", {
+        ...existing,
+        items: updatedItems,
+        updatedAt: new Date().toISOString(),
+      }, true);
+    }
+
     return request("ADD_ITEMS_TO_ORDER", {
       orderId,
-      items: normalizeOrderPayload({ items }).items,
+      items: normItems,
       discount,
     });
   },
@@ -651,7 +690,7 @@ export const orderApi = {
     return request("GET_ORDER_BY_TICKET", { ticketId });
   },
 
-  deleteOrder(orderId) {
+  async deleteOrder(orderId) {
     const user = getStoredAuthUser();
     if (!user || user.role !== "admin") {
       return Promise.reject(
@@ -660,16 +699,16 @@ export const orderApi = {
     }
 
     const orders = appStore.get("orders") || [];
-    const targetOrder = orders.find((o) => o.id === orderId);
+    const targetOrder = orders.find((o) => String(o.id) === String(orderId));
 
     if (targetOrder && targetOrder.tableId) {
       appStore.update("tables", {
         id: String(targetOrder.tableId),
         status: "available",
-      });
+      }, true);
     }
 
-    appStore.remove("orders", orderId);
+    appStore.remove("orders", orderId, true);
 
     return request("DELETE_ORDER", {
       orderId,
@@ -702,6 +741,7 @@ export const productApi = {
     const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
     const product = normalizeProductForLocal(payload);
     writeLocalArray(LOCAL_DB_KEY.PRODUCTS, [...products, product]);
+    appStore.add("products", product, true);
 
     request("CREATE_PRODUCT", payload)
       .then((serverProduct) => {
@@ -710,6 +750,7 @@ export const productApi = {
           p.id === product.id ? serverProduct : p
         );
         writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
+        if (serverProduct) appStore.update("products", serverProduct, true);
       })
       .catch((err) => {
         console.error("Background CREATE_PRODUCT failed:", err);
@@ -730,6 +771,7 @@ export const productApi = {
       )
       : [...products, product];
     writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
+    appStore.update("products", product, true);
 
     request("UPDATE_PRODUCT", {
       productId,
@@ -742,6 +784,7 @@ export const productApi = {
           p.id === productId ? serverProduct : p
         );
         writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updatedWithServer);
+        if (serverProduct) appStore.update("products", serverProduct, true);
       })
       .catch((err) => {
         console.error("Background UPDATE_PRODUCT failed:", err);
@@ -751,28 +794,24 @@ export const productApi = {
   },
 
   async deleteProduct(productId, userRole) {
-    const products = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
-    const updated = products.map((item) =>
-      item.id === productId ? { ...item, status: "DELETED" } : item,
-    );
-    writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updated);
+    const user = getStoredAuthUser();
+    const role = userRole || user?.role || "admin";
 
-    request("DELETE_PRODUCT", {
-      productId,
-      userRole,
-    })
-      .then(() => {
-        const current = readLocalArray(LOCAL_DB_KEY.PRODUCTS);
-        const updatedWithServer = current.map((p) =>
-          p.id === productId ? { ...p, status: "DELETED" } : p
-        );
-        writeLocalArray(LOCAL_DB_KEY.PRODUCTS, updatedWithServer);
-      })
-      .catch((err) => {
-        console.error("Background DELETE_PRODUCT failed:", err);
+    // 1. Instantly update AppStore & LocalStorage
+    appStore.remove("products", productId, true);
+
+    try {
+      // 2. Call backend / Firebase
+      await request("DELETE_PRODUCT", {
+        productId,
+        userRole: role,
       });
+    } catch (err) {
+      console.warn("DELETE_PRODUCT API call fallback to CrudService:", err);
+      await CrudService.delete("products", productId);
+    }
 
-    return updated.find((item) => item.id === productId) || null;
+    return { success: true, id: productId };
   },
 };
 
@@ -786,6 +825,7 @@ export const discountApi = {
       .then((discounts) => {
         if (Array.isArray(discounts)) {
           writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, discounts);
+          appStore.set("discounts", discounts, true);
         }
       })
       .catch((err) => {
@@ -801,6 +841,7 @@ export const discountApi = {
     const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
     const discount = normalizeDiscountForLocal(payload);
     writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, [...discounts, discount]);
+    appStore.add("discounts", discount, true);
 
     request("CREATE_DISCOUNT", payload)
       .then((serverDiscount) => {
@@ -809,6 +850,7 @@ export const discountApi = {
           d.id === discount.id ? serverDiscount : d
         );
         writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
+        if (serverDiscount) appStore.update("discounts", serverDiscount, true);
       })
       .catch((err) => {
         console.error("Background CREATE_DISCOUNT failed:", err);
@@ -829,6 +871,7 @@ export const discountApi = {
       )
       : [...discounts, discount];
     writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
+    appStore.update("discounts", discount, true);
 
     request("UPDATE_DISCOUNT", {
       discountId,
@@ -841,6 +884,7 @@ export const discountApi = {
           d.id === discountId ? serverDiscount : d
         );
         writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updatedWithServer);
+        if (serverDiscount) appStore.update("discounts", serverDiscount, true);
       })
       .catch((err) => {
         console.error("Background UPDATE_DISCOUNT failed:", err);
@@ -850,28 +894,24 @@ export const discountApi = {
   },
 
   async deleteDiscount(discountId, userRole) {
-    const discounts = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
-    const updated = discounts.map((item) =>
-      item.id === discountId ? { ...item, status: "DELETED" } : item,
-    );
-    writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updated);
+    const user = getStoredAuthUser();
+    const role = userRole || user?.role || "admin";
 
-    request("DELETE_DISCOUNT", {
-      discountId,
-      userRole,
-    })
-      .then(() => {
-        const current = readLocalArray(LOCAL_DB_KEY.DISCOUNTS);
-        const updatedWithServer = current.map((d) =>
-          d.id === discountId ? { ...d, status: "DELETED" } : d
-        );
-        writeLocalArray(LOCAL_DB_KEY.DISCOUNTS, updatedWithServer);
-      })
-      .catch((err) => {
-        console.error("Background DELETE_DISCOUNT failed:", err);
+    // 1. Instantly update AppStore & LocalStorage
+    appStore.remove("discounts", discountId, true);
+
+    try {
+      // 2. Call backend / Firebase
+      await request("DELETE_DISCOUNT", {
+        discountId,
+        userRole: role,
       });
+    } catch (err) {
+      console.warn("DELETE_DISCOUNT API call fallback to CrudService:", err);
+      await CrudService.delete("discounts", discountId);
+    }
 
-    return updated.find((item) => item.id === discountId) || null;
+    return { success: true, id: discountId };
   },
 };
 

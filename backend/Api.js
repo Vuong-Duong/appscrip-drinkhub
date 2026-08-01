@@ -398,6 +398,11 @@ const handleRunMigration_ = withTryCatch_((payload, context) => {
   return ok_(runMigrationFromSheetsToFirestore());
 });
 
+const handlePurgeAllowedData_ = withTryCatch_((payload, context) => {
+  const userRole = context?.user?.role || payload?.userRole;
+  return ok_(purgeAllowedFirestoreCollections(userRole));
+});
+
 // =========================
 // ACTION HANDLERS REGISTRY
 // =========================
@@ -405,6 +410,8 @@ const ACTION_HANDLERS = Object.freeze({
   CREATE_ORDER: handleCreateOrder_,
   DELETE_ORDER: handleDeleteOrder_,
   RUN_MIGRATION: handleRunMigration_,
+  PURGE_ALLOWED_DATA: handlePurgeAllowedData_,
+  CLEAR_ALLOWED_DATA: handlePurgeAllowedData_,
   PAYMENT: handlePayment_,
   PAYMENT_ANDROID: handlePaymentAndroid_,
   GET_DELTA: handleGetDelta_,

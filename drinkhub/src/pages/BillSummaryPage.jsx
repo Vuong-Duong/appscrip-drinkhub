@@ -116,8 +116,10 @@ export default function BillSummaryPage() {
       const closedOrder = {
         id: orderId,
         tableId: orderData.tableId,
+        tableName: orderData.tableName || existingOrderObj?.tableName,
         customerName: orderData.customerName,
         status: "CLOSED",
+        items: orderData.items || existingOrderObj?.items || [],
         subtotal: orderData.subtotal,
         discount: orderData.discount,
         grandTotal: orderData.grandTotal,

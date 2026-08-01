@@ -181,3 +181,135 @@ function hourlyMaintenance_() {
     timestamp: toIsoString_(new Date()),
   });
 }
+
+// =========================
+// SYSTEM PURGE & RESET (EXCLUDING PROTECTED COLLECTIONS)
+// =========================
+
+/**
+ * Xóa toàn bộ document/data của các collection ngoại trừ 5 collection bảo vệ:
+ * 1. accounts
+ * 2. products
+ * 3. store_info
+ * 4. tables
+ * 5. shifts
+ * 
+ * Toàn bộ document & subcollection của 5 collection trên được giữ nguyên 100%.
+ *
+ * @param {string} userRole - Quyền tài khoản (Chỉ Admin)
+ * @returns {Object} { success, deletedCollections, failedCollections, totalDeletedDocuments }
+ */
+function purgeAllowedFirestoreCollections(userRole) {
+  const role = String(userRole || "").toLowerCase().trim();
+  if (role !== "admin") {
+    throw new Error("PERMISSION_DENIED: Chỉ Admin mới có quyền thực hiện thao tác xóa dữ liệu hệ thống");
+  }
+
+  // 5 collection tuyệt đối KHÔNG ĐƯỢC XÓA
+  const PROTECTED_COLLECTIONS = [
+    "accounts",
+    "products",
+    "store_info",
+    "tables",
+    "shifts",
+  ];
+
+  // 1. Lấy danh sách collection động từ Firestore + mảng mặc định
+  let fetchedCollections = [];
+  try {
+    fetchedCollections = firestoreListCollectionIds_();
+  } catch (e) {
+    console.warn("Failed to dynamically fetch collection list:", e);
+  }
+
+  const defaultDataCollections = [
+    "orders",
+    "order_snapshots",
+    "payments",
+    "discounts",
+    "system_queue",
+    "logs",
+    "inventory_logs",
+    "ingredients",
+    "categories",
+  ];
+
+  const combinedCollections = Array.from(
+    new Set([...fetchedCollections, ...defaultDataCollections])
+  );
+
+  // 2. Lọc bỏ các collection được bảo vệ
+  const targetCollections = combinedCollections.filter((colName) => {
+    const normalized = String(colName || "").toLowerCase().trim();
+    return !PROTECTED_COLLECTIONS.includes(normalized);
+  });
+
+  const deletedCollections = [];
+  const failedCollections = [];
+  let totalDeletedDocuments = 0;
+
+  // 3. Xử lý xóa siêu tốc từng collection
+  for (let c = 0; c < targetCollections.length; c++) {
+    const colName = targetCollections[c];
+    try {
+      // Lấy danh sách document (nếu lớn hơn 500 thì chia trang xử lý)
+      const docs = firestoreQuery_(colName, { limit: 500 });
+      if (!Array.isArray(docs) || docs.length === 0) {
+        deletedCollections.push(colName);
+        continue;
+      }
+
+      const deleteOperations = [];
+      for (let i = 0; i < docs.length; i++) {
+        const doc = docs[i];
+        if (doc && doc.id) {
+          deleteOperations.push({
+            type: "delete",
+            collection: colName,
+            id: doc.id,
+          });
+        }
+      }
+
+      if (deleteOperations.length > 0) {
+        const deletedCount = firestoreChunkedBatchDelete_(deleteOperations);
+        totalDeletedDocuments += deletedCount;
+      }
+      
+      deletedCollections.push(colName);
+
+    } catch (err) {
+      console.error(`Error purging collection ${colName}:`, err);
+      failedCollections.push({
+        collection: colName,
+        error: err.message || String(err),
+      });
+      logSystemError_({
+        type: "PURGE_COLLECTION_FAILED",
+        collection: colName,
+        error: err.message,
+      });
+    }
+  }
+
+  const result = {
+    success: failedCollections.length === 0,
+    deletedCollections: deletedCollections,
+    failedCollections: failedCollections,
+    totalDeletedDocuments: totalDeletedDocuments,
+  };
+
+  logAction_("PURGE_ALLOWED_COLLECTIONS", "SYSTEM", userRole || "admin", result);
+  return result;
+}
+
+/**
+ * Hàm Helper dành riêng cho Dev chạy trực tiếp từ Google Apps Script Editor
+ */
+function runPurgeDataDev() {
+  console.log("=== BẮT ĐẦU CHẠY THAO TÁC XÓA DỮ LIỆU TỐI ƯU SIÊU TỐC ===");
+  const result = purgeAllowedFirestoreCollections("admin");
+  console.log("=== KẾT QUẢ THỰC THI ===");
+  console.log(JSON.stringify(result, null, 2));
+  return result;
+}

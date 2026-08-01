@@ -116,28 +116,29 @@ class AppStore {
    */
   set(entity, data, persist = true) {
     let finalData = data;
-    if (entity === "tables" && Array.isArray(data)) {
-      finalData = data.map((t) => ({
+    if (Array.isArray(data)) {
+      finalData = data.filter((item) => item && item.status !== "DELETED");
+    }
+    if (entity === "tables" && Array.isArray(finalData)) {
+      finalData = finalData.map((t) => ({
         ...t,
         id: String(t.id),
         status: String(t.status || "").trim().toLowerCase(),
       }));
     }
-    this.state[entity] = finalData;
+    const newEntityData = Array.isArray(finalData) ? [...finalData] : finalData;
+    this.state = {
+      ...this.state,
+      [entity]: newEntityData,
+    };
     if (persist) {
       StorageService.set(entity, finalData);
     }
     this._notify();
   }
 
-  /**
-   * Update single item in entity
-   * @param {string} entity - Entity name
-   * @param {Object} item - Item to update (must have id)
-   * @param {boolean} persist - Also save to localStorage
-   */
   update(entity, item, persist = true) {
-    const arr = this.state[entity];
+    const arr = this.state[entity] || [];
     if (!Array.isArray(arr)) {
       console.warn(`[AppStore] ${entity} is not array, skipping update`);
       return;
@@ -153,66 +154,86 @@ class AppStore {
     }
 
     const idx = arr.findIndex((x) => String(x.id) === String(finalItem.id));
+    let newArr;
     if (idx >= 0) {
-      arr[idx] = { ...arr[idx], ...finalItem };
+      if (finalItem.status === "DELETED") {
+        newArr = arr.filter((x) => String(x.id) !== String(finalItem.id));
+        if (persist) {
+          StorageService.remove(entity, finalItem.id);
+        }
+      } else {
+        newArr = [...arr];
+        newArr[idx] = { ...newArr[idx], ...finalItem };
+        if (persist) {
+          StorageService.update(entity, finalItem);
+        }
+      }
     } else {
-      arr.push(finalItem);
+      if (finalItem.status !== "DELETED") {
+        newArr = [...arr, finalItem];
+        if (persist) {
+          StorageService.update(entity, finalItem);
+        }
+      } else {
+        newArr = [...arr];
+      }
     }
 
-    if (persist) {
-      StorageService.update(entity, finalItem);
-    }
+    this.state = {
+      ...this.state,
+      [entity]: newArr,
+    };
     this._notify();
   }
 
-  /**
-   * Add item to entity
-   * @param {string} entity - Entity name
-   * @param {Object} item - Item to add
-   * @param {boolean} persist - Also save to localStorage
-   */
   add(entity, item, persist = true) {
-    const arr = this.state[entity];
+    const arr = this.state[entity] || [];
     if (!Array.isArray(arr)) {
       console.warn(`[AppStore] ${entity} is not array, skipping add`);
       return;
     }
 
-    arr.push(item);
-
-    if (persist) {
-      StorageService.update(entity, item);
+    if (item && item.status !== "DELETED") {
+      const idx = arr.findIndex((x) => String(x.id) === String(item.id));
+      let newArr;
+      if (idx >= 0) {
+        newArr = [...arr];
+        newArr[idx] = { ...newArr[idx], ...item };
+      } else {
+        newArr = [...arr, item];
+      }
+      this.state = {
+        ...this.state,
+        [entity]: newArr,
+      };
+      if (persist) {
+        StorageService.update(entity, item);
+      }
     }
     this._notify();
   }
 
-  /**
-   * Remove item from entity
-   * @param {string} entity - Entity name
-   * @param {string|number} id - Item id
-   * @param {boolean} persist - Also remove from localStorage
-   */
   remove(entity, id, persist = true) {
-    const arr = this.state[entity];
+    const arr = this.state[entity] || [];
     if (!Array.isArray(arr)) return;
 
-    const idx = arr.findIndex((x) => x.id === id);
-    if (idx >= 0) {
-      arr.splice(idx, 1);
-      if (persist) {
-        StorageService.remove(entity, id);
-      }
-      this._notify();
+    const newArr = arr.filter((x) => String(x.id) !== String(id));
+    this.state = {
+      ...this.state,
+      [entity]: newArr,
+    };
+    if (persist) {
+      StorageService.remove(entity, id);
     }
+    this._notify();
   }
 
-  /**
-   * Batch load all data from first install
-   * @param {Object} allData - All entities {products: [], ...}
-   */
   loadAll(allData) {
     Object.keys(allData).forEach((entity) => {
       let data = allData[entity];
+      if (Array.isArray(data)) {
+        data = data.filter((item) => item && item.status !== "DELETED");
+      }
       if (entity === "tables" && Array.isArray(data)) {
         data = data.map((t) => ({
           ...t,
