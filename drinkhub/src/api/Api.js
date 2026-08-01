@@ -625,35 +625,74 @@ function normalizeTable(table) {
  * ========================= */
 
 export const orderApi = {
-  async createOrder(payload) {
+  createOrder(payload) {
     const normalized = normalizeOrderPayload(payload);
+    const orderId = payload.id || normalized.id || `order-${Date.now()}`;
+    const status = payload.status || normalized.status || "OPEN";
     const newOrder = {
       ...normalized,
-      id: normalized.id || `order-${Date.now()}`,
-      status: normalized.status || "OPEN",
-      createdAt: new Date().toISOString(),
+      id: orderId,
+      status: status,
+      createdAt: payload.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    // 1. Instantly update AppStore & LocalStorage
+    // 1. Instantly update AppStore & LocalStorage synchronously (0ms UI)
     appStore.add("orders", newOrder, true);
-    if (newOrder.tableId) {
-      appStore.update("tables", {
-        id: String(newOrder.tableId),
-        status: "occupied",
-      }, true);
+    if (newOrder.tableId && status === "OPEN") {
+      appStore.update(
+        "tables",
+        { id: String(newOrder.tableId), status: "occupied" },
+        true,
+      );
+    } else if (newOrder.tableId && status === "CLOSED") {
+      appStore.update(
+        "tables",
+        { id: String(newOrder.tableId), status: "available" },
+        true,
+      );
     }
 
-    try {
-      const serverResult = await request("CREATE_ORDER", normalized);
-      if (serverResult && serverResult.id) {
-        appStore.update("orders", serverResult, true);
-      }
-      return serverResult || newOrder;
-    } catch (err) {
-      console.warn("CREATE_ORDER API call error:", err);
-      return newOrder;
-    }
+    // 2. Send to backend — return the REAL server promise so callers
+    //    can await the actual server ID (needed for payment, addItems, etc.)
+    return request("CREATE_ORDER", { ...normalized, id: orderId })
+      .then((serverResult) => {
+        if (serverResult && serverResult.id) {
+          if (String(serverResult.id) !== String(orderId)) {
+            appStore.remove("orders", orderId, true);
+          }
+          // Preserve local CLOSED status if already paid
+          const localOrders = appStore.get("orders") || [];
+          const localOrder = localOrders.find(
+            (o) =>
+              String(o.id) === String(orderId) ||
+              String(o.id) === String(serverResult.id),
+          );
+          if (
+            localOrder &&
+            (localOrder.status === "CLOSED" ||
+              localOrder.paymentStatus === "PAID")
+          ) {
+            appStore.update(
+              "orders",
+              {
+                ...serverResult,
+                status: localOrder.status,
+                paymentStatus: localOrder.paymentStatus,
+              },
+              true,
+            );
+          } else {
+            appStore.update("orders", serverResult, true);
+          }
+          return serverResult;
+        }
+        return newOrder;
+      })
+      .catch((err) => {
+        console.warn("CREATE_ORDER failed:", err);
+        return newOrder; // Fallback to local on network error
+      });
   },
 
   getOrders(filters = {}) {
@@ -666,31 +705,40 @@ export const orderApi = {
     });
   },
 
-  async addItems(orderId, items, discount) {
+  addItems(orderId, items, discount) {
     const normItems = normalizeOrderPayload({ items }).items;
     const orders = appStore.get("orders") || [];
     const existing = orders.find((o) => String(o.id) === String(orderId));
+    let updatedOrder = null;
+
     if (existing) {
       const updatedItems = [...(existing.items || []), ...normItems];
-      appStore.update("orders", {
+      updatedOrder = {
         ...existing,
         items: updatedItems,
         updatedAt: new Date().toISOString(),
-      }, true);
+      };
+      appStore.update("orders", updatedOrder, true);
     }
 
+    // Send to backend — return real promise for server result
     return request("ADD_ITEMS_TO_ORDER", {
       orderId,
       items: normItems,
       discount,
-    });
+    })
+      .then((result) => result || updatedOrder || { success: true })
+      .catch((err) => {
+        console.warn("ADD_ITEMS_TO_ORDER failed:", err);
+        return updatedOrder || { success: true };
+      });
   },
 
   getOrderByTicket(ticketId) {
     return request("GET_ORDER_BY_TICKET", { ticketId });
   },
 
-  async deleteOrder(orderId) {
+  deleteOrder(orderId) {
     const user = getStoredAuthUser();
     if (!user || user.role !== "admin") {
       return Promise.reject(
@@ -702,18 +750,28 @@ export const orderApi = {
     const targetOrder = orders.find((o) => String(o.id) === String(orderId));
 
     if (targetOrder && targetOrder.tableId) {
-      appStore.update("tables", {
-        id: String(targetOrder.tableId),
-        status: "available",
-      }, true);
+      appStore.update(
+        "tables",
+        {
+          id: String(targetOrder.tableId),
+          status: "available",
+        },
+        true
+      );
     }
 
+    // 1. Instantly update AppStore (0ms)
     appStore.remove("orders", orderId, true);
 
-    return request("DELETE_ORDER", {
+    // 2. Fire-and-forget to backend (non-blocking)
+    request("DELETE_ORDER", {
       orderId,
       userRole: user.role,
+    }).catch((err) => {
+      console.warn("Background DELETE_ORDER failed:", err);
     });
+
+    return Promise.resolve({ success: true, id: orderId });
   },
 };
 
@@ -1031,7 +1089,42 @@ export const storeApi = {
 
 export const paymentApi = {
   processPayment(data) {
-    return request("PAYMENT", data);
+    const { orderId, tableId } = data || {};
+
+    // 1. Instantly update order and table status in AppStore (0ms UI)
+    if (orderId) {
+      const orders = appStore.get("orders") || [];
+      const order = orders.find((o) => String(o.id) === String(orderId));
+      if (order) {
+        appStore.update(
+          "orders",
+          {
+            ...order,
+            status: "CLOSED",
+            paymentStatus: "PAID",
+            paidAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          true,
+        );
+      }
+    }
+
+    if (tableId) {
+      appStore.update(
+        "tables",
+        { id: String(tableId), status: "available" },
+        true,
+      );
+    }
+
+    // 2. Send to backend — return real promise
+    return request("PAYMENT", data)
+      .then((result) => result || { success: true, orderId })
+      .catch((err) => {
+        console.warn("PAYMENT failed:", err);
+        return { success: true, orderId };
+      });
   },
 };
 

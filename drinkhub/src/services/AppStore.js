@@ -134,6 +134,9 @@ class AppStore {
     if (persist) {
       StorageService.set(entity, finalData);
     }
+    if (entity === "orders" || entity === "tables") {
+      this.recalculateTableStatuses(false);
+    }
     this._notify();
   }
 
@@ -183,6 +186,9 @@ class AppStore {
       ...this.state,
       [entity]: newArr,
     };
+    if (entity === "orders") {
+      this.recalculateTableStatuses(false);
+    }
     this._notify();
   }
 
@@ -210,6 +216,9 @@ class AppStore {
         StorageService.update(entity, item);
       }
     }
+    if (entity === "orders") {
+      this.recalculateTableStatuses(false);
+    }
     this._notify();
   }
 
@@ -225,7 +234,70 @@ class AppStore {
     if (persist) {
       StorageService.remove(entity, id);
     }
+    if (entity === "orders") {
+      this.recalculateTableStatuses(false);
+    }
     this._notify();
+  }
+
+  /**
+   * Tự động tính toán lại trạng thái bàn (occupied/available) dựa trên danh sách Order đang OPEN
+   */
+  recalculateTableStatuses(triggerNotify = true) {
+    const tables = this.state.tables;
+    if (!Array.isArray(tables) || tables.length === 0) return;
+
+    const openOrders = (this.state.orders || []).filter(
+      (o) => o && String(o.status || "").trim().toUpperCase() === "OPEN"
+    );
+
+    const openTableMap = new Map();
+    openOrders.forEach((order) => {
+      if (order.tableId) {
+        openTableMap.set(String(order.tableId).trim().toLowerCase(), order.id);
+      }
+      if (order.tableName) {
+        openTableMap.set(String(order.tableName).trim().toLowerCase(), order.id);
+      }
+      const digits = String(order.tableName || order.tableId || "").replace(/\D+/g, "");
+      if (digits) {
+        openTableMap.set(`digits_${digits}`, order.id);
+      }
+    });
+
+    const newTables = tables.map((t) => {
+      const tId = String(t.id || "").trim().toLowerCase();
+      const tName = String(t.name || "").trim().toLowerCase();
+      const tDigits = tName.replace(/\D+/g, "") || tId.replace(/\D+/g, "");
+
+      const openOrderId =
+        openTableMap.get(tId) ||
+        openTableMap.get(tName) ||
+        (tDigits ? openTableMap.get(`digits_${tDigits}`) : null);
+
+      if (openOrderId) {
+        return {
+          ...t,
+          status: "occupied",
+          currentOrderId: openOrderId,
+        };
+      } else {
+        return {
+          ...t,
+          status: t.status === "reserved" ? "reserved" : "available",
+          currentOrderId: null,
+        };
+      }
+    });
+
+    this.state = {
+      ...this.state,
+      tables: newTables,
+    };
+    StorageService.set("tables", newTables);
+    if (triggerNotify) {
+      this._notify();
+    }
   }
 
   loadAll(allData) {
@@ -245,6 +317,7 @@ class AppStore {
     });
     StorageService.setAll(allData);
     this.state.lastSync = Date.now();
+    this.recalculateTableStatuses(false);
     this._notify();
   }
 

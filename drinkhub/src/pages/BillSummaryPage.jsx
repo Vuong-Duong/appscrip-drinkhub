@@ -209,12 +209,20 @@ export default function BillSummaryPage() {
         try {
           let finalOrderId = orderId;
           let finalAmount = amount;
-          const isLocalTempId = String(orderId).startsWith("ord_local_");
+          const isLocalTempId = String(orderId).startsWith("ord_local_") || String(orderId).startsWith("ord_17");
 
           if (!orderData.existingOrderId || isLocalTempId) {
-            const serverOrder = await orderApi.createOrder(orderData);
-            finalOrderId = serverOrder.id;
-            finalAmount = Number(serverOrder.grandTotal) || amount;
+            const serverOrder = await orderApi.createOrder({
+              ...orderData,
+              id: orderId,
+              status: "CLOSED",
+              paymentStatus: "PAID",
+            });
+            if (serverOrder && serverOrder.id && String(serverOrder.id) !== String(orderId)) {
+              appStore.remove("orders", orderId, true);
+            }
+            finalOrderId = serverOrder?.id || orderId;
+            finalAmount = Number(serverOrder?.grandTotal) || amount;
           } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
             const result = await orderApi.addItems(
               orderData.existingOrderId,
@@ -222,7 +230,7 @@ export default function BillSummaryPage() {
               orderData.discount,
             );
             orderData.newCartItems = [];
-            finalAmount = Number(result.grandTotal) || amount;
+            finalAmount = Number(result?.grandTotal) || amount;
           }
 
           await paymentApi.processPayment({

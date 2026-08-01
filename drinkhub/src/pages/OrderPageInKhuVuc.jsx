@@ -595,43 +595,50 @@ export default function OrderPage() {
       // Print slip immediately
       printCurrentCartReceipt(tempOrderId, true);
 
-      // 2. Trigger background sync to server
+      // 2. Trigger background sync to server — pass tempOrderId so orderApi
+      //    reuses the same ID instead of generating a new one (avoids duplicate)
       orderApi
-        .createOrder(orderPayload)
+        .createOrder({ ...orderPayload, id: tempOrderId })
         .then((serverOrder) => {
-          // Safely update: remap temp IDs to server IDs without wiping data
+          if (!serverOrder || !serverOrder.id) return;
           const serverOrderId = serverOrder.id;
 
-          // Update order: change temp ID to server ID, keep all other data
-          const latestOrders = appStore.get("orders") || [];
-          appStore.set(
-            "orders",
-            latestOrders.map((o) =>
-              o.id === tempOrderId
-                ? { ...o, ...serverOrder, id: serverOrderId }
-                : o,
-            ),
-          );
+          // If backend returned a different ID, remap temp → server
+          if (serverOrderId !== tempOrderId) {
+            const latestOrders = appStore.get("orders") || [];
+            // Remove the temp entry that orderApi.createOrder may have added
+            const cleaned = latestOrders.filter(
+              (o) => o.id !== tempOrderId && o.id !== serverOrderId,
+            );
+            const merged = {
+              ...latestOrders.find((o) => o.id === tempOrderId),
+              ...serverOrder,
+              id: serverOrderId,
+            };
+            appStore.set("orders", [...cleaned, merged]);
 
-          // Update orderDetails: remap orderId from temp to server ID (keep local items intact)
-          const latestDetails = appStore.get("orderDetails") || [];
-          appStore.set(
-            "orderDetails",
-            latestDetails.map((d) =>
-              d.orderId === tempOrderId ? { ...d, orderId: serverOrderId } : d,
-            ),
-          );
+            // Remap orderDetails
+            const latestDetails = appStore.get("orderDetails") || [];
+            appStore.set(
+              "orderDetails",
+              latestDetails.map((d) =>
+                d.orderId === tempOrderId
+                  ? { ...d, orderId: serverOrderId }
+                  : d,
+              ),
+            );
 
-          // Update table with server order ID
-          const latestTables = appStore.get("tables") || [];
-          appStore.set(
-            "tables",
-            latestTables.map((t) =>
-              String(t.id) === String(decodedTableId)
-                ? { ...t, currentOrderId: serverOrderId }
-                : t,
-            ),
-          );
+            // Update table currentOrderId
+            const latestTables = appStore.get("tables") || [];
+            appStore.set(
+              "tables",
+              latestTables.map((t) =>
+                String(t.id) === String(decodedTableId)
+                  ? { ...t, currentOrderId: serverOrderId }
+                  : t,
+              ),
+            );
+          }
         })
         .catch((err) => {
           console.error("Failed to sync pay later order:", err);

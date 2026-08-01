@@ -8,6 +8,9 @@ import CustomerDisplayService from "../services/CustomerDisplayService";
 import { tableApi } from "../api/Api";
 import { getStoredAuthUser } from "../utils/auth";
 
+const getNormalizedStatus = (status) =>
+  String(status || "").trim().toLowerCase();
+
 export default function TablePage() {
   const navigate = useNavigate();
   const [storeState, setStoreState] = useState(appStore.getState());
@@ -78,14 +81,19 @@ export default function TablePage() {
     }
   };
 
-  const available = tables.filter((t) => t.status === "available").length;
-  const occupied = tables.filter((t) => t.status === "occupied").length;
+  const available = tables.filter(
+    (t) => getNormalizedStatus(t.status) === "available"
+  ).length;
+  const occupied = tables.filter(
+    (t) => getNormalizedStatus(t.status) === "occupied"
+  ).length;
 
   const getTableStyle = (status) => {
-    if (status === "occupied") {
+    const norm = getNormalizedStatus(status);
+    if (norm === "occupied") {
       return "bg-emerald-100 border-emerald-500 shadow-md";
     }
-    if (status === "reserved") return "bg-amber-100 border-amber-500";
+    if (norm === "reserved") return "bg-amber-100 border-amber-500";
     return "bg-white border-gray-300 hover:border-blue-400 hover:shadow-lg";
   };
 
@@ -166,67 +174,52 @@ export default function TablePage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {isLoading && (
-            <div className="col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-5 text-center py-16 text-gray-500">
+            <div className="col-span-full text-center py-16 text-gray-500">
               Đang tải danh sách bàn...
             </div>
           )}
 
           {!isLoading && tables.length === 0 && (
-            <div className="col-span-2 sm:col-span-3 md:col-span-4 lg:col-span-5 text-center py-16 text-gray-500">
+            <div className="col-span-full text-center py-16 text-gray-500">
               Chưa có dữ liệu bàn
             </div>
           )}
 
-          {tables.map((table) => (
-            <div
-              key={table.id}
-              onClick={() => navigate(`/order/${encodeURIComponent(table.id)}`)}
-              className={`aspect-[1.08] rounded-3xl border-2 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-[0.97] ${getTableStyle(table.status)}`}
-            >
-              <div className="text-2xl sm:text-4xl lg:text-5xl font-bold text-gray-700 mb-2">
-                {getTableLabel(table)}
+          {tables.map((table) => {
+            const normStatus = getNormalizedStatus(table.status);
+            return (
+              <div
+                key={table.id}
+                onClick={() =>
+                  navigate(`/order/${encodeURIComponent(table.id)}`)
+                }
+                className={`aspect-[1.08] rounded-3xl border-2 flex flex-col items-center justify-center cursor-pointer transition-all active:scale-[0.97] ${getTableStyle(
+                  table.status,
+                )}`}
+              >
+                <div className="text-2xl sm:text-4xl lg:text-5xl font-bold text-gray-700 mb-2">
+                  {getTableLabel(table)}
+                </div>
+
+                {normStatus === "occupied" && (
+                  <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
+                    <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span>Đang phục vụ</span>
+                  </div>
+                )}
+
+                {normStatus === "reserved" && (
+                  <div className="text-amber-600 text-sm font-medium">
+                    Đặt trước
+                  </div>
+                )}
+
+                {normStatus === "available" && (
+                  <div className="text-gray-400 text-sm">Trống</div>
+                )}
               </div>
-
-              {table.status === "occupied" && (
-                <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                  <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                  <span>Đang phục vụ</span>
-                </div>
-              )}
-
-              {table.status === "reserved" && (
-                <div className="text-amber-600 text-sm font-medium">
-                  Đặt trước
-                </div>
-              )}
-
-              {table.status === "available" && (
-                <div className="text-gray-400 text-sm">Trống</div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t py-4 px-6 flex items-center justify-between text-sm z-40 shadow">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-blue-100 rounded-2xl flex items-center justify-center text-xl">
-            #
-          </div>
-          <div>
-            <p className="font-medium">Khu vực</p>
-            <p className="text-xs text-gray-500">Danh sách bàn từ sheet</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-blue-100 rounded-2xl flex items-center justify-center text-xl">
-            POS
-          </div>
-          <div>
-            <p className="font-medium">Nhà Hàng</p>
-            <p className="font-mono text-blue-600">{tables.length} bàn</p>
-          </div>
+            );
+          })}
         </div>
       </div>
 
