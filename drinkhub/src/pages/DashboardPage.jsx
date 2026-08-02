@@ -211,13 +211,27 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
     return d.getTime() >= startDate.getTime() && d.getTime() <= endDate.getTime();
   };
 
-  const filteredPayments = allPayments.filter((p) => isDateInRange(p.paidAt));
-  const totalRevenue = filteredPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  // Chỉ lọc các Order đã thanh toán / hoàn tất trong khoảng thời gian được chọn
+  const validFilteredOrders = allOrders.filter((o) => {
+    if (!o || !o.id) return false;
+    const status = (o.status || "").trim().toUpperCase();
+    const pStatus = (o.paymentStatus || "").trim().toUpperCase();
+    const isPaid = status === "CLOSED" || pStatus === "PAID";
+    if (!isPaid) return false;
+    return isDateInRange(o.createdAt || o.paidAt);
+  });
 
+  // Tổng doanh thu thực tế thu về (sau khi đã trừ giảm giá của các đơn hàng)
+  const totalRevenue = validFilteredOrders.reduce(
+    (sum, o) => sum + (Number(o.grandTotal ?? (Number(o.subtotal || 0) - Number(o.discount || 0))) || 0),
+    0,
+  );
+
+  // Phương thức thanh toán
   const paymentMethods = {};
-  filteredPayments.forEach((p) => {
-    const provider = (p.provider || "cash").trim().toLowerCase();
-    const amount = Number(p.amount) || 0;
+  validFilteredOrders.forEach((o) => {
+    const provider = (o.paymentMethod || "cash").trim().toLowerCase() === "transfer" ? "transfer" : "cash";
+    const amount = Number(o.grandTotal ?? (Number(o.subtotal || 0) - Number(o.discount || 0))) || 0;
     paymentMethods[provider] = (paymentMethods[provider] || 0) + amount;
   });
 
@@ -226,11 +240,6 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
     amount: value,
     percentage: totalRevenue > 0 ? ((value / totalRevenue) * 100).toFixed(1) : "0.0",
   }));
-
-  const paidOrderIds = new Set(filteredPayments.map((p) => p.orderId).filter(Boolean));
-  const filteredOrders = allOrders.filter(
-    (o) => paidOrderIds.has(o.id) || isDateInRange(o.createdAt || o.paidAt),
-  );
 
   // Map giá vốn và danh mục sản phẩm từ allProducts
   const productCostMap = {};
@@ -249,72 +258,49 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
     }
   });
 
-  // Trích xuất tất cả các món đã bán trong kỳ từ order.items và allOrderDetails
-  const allItemRowsInRange = [];
-  filteredOrders.forEach((o) => {
-    if (Array.isArray(o.items) && o.items.length > 0) {
-      o.items.forEach((item) => {
-        allItemRowsInRange.push({
-          productId: item.productId || item.id,
-          productName: item.productName || item.name || "Món không tên",
-          quantity: Number(item.quantity || 1),
-          subtotal: Number(item.subtotal || item.total || (Number(item.unitPrice || item.price || 0) * Number(item.quantity || 1))),
-          toppings: item.toppings || [],
-        });
-      });
-    }
-  });
-
-  // Nạp thêm từ allOrderDetails nếu danh sách trước đó rỗng
-  if (allItemRowsInRange.length === 0 && allOrderDetails.length > 0) {
-    allOrderDetails.forEach((d) => {
-      if (paidOrderIds.has(d.orderId) || isDateInRange(d.createdAt)) {
-        allItemRowsInRange.push({
-          productId: d.productId || d.id,
-          productName: d.productName || d.name || "Món không tên",
-          quantity: Number(d.quantity || 1),
-          subtotal: Number(d.subtotal || d.total || 0),
-          toppings: [],
-        });
-      }
-    });
-  }
-
-  // Tổng hợp Mặt hàng bán chạy, Nhóm hàng bán chạy và Tổng giá vốn
+  // Tổng hợp Mặt hàng bán chạy, Nhóm hàng bán chạy và Tổng giá vốn từ các Order hợp lệ
   const topProducts = {};
   const topCategories = {};
   let totalCost = 0;
 
-  allItemRowsInRange.forEach((item) => {
-    const name = item.productName;
-    const qty = item.quantity;
-    const sub = item.subtotal;
-    const idKey = String(item.productId || "");
-    const nameKey = String(name || "").trim().toLowerCase();
+  validFilteredOrders.forEach((o) => {
+    const items = Array.isArray(o.items) ? o.items : [];
+    const orderSubtotal = Number(o.subtotal) || 0;
+    const orderDiscount = Number(o.discount) || 0;
+    const discountRatio = orderSubtotal > 0 ? 1 - orderDiscount / orderSubtotal : 1;
 
-    // Tính giá vốn món
-    const unitCost = productCostMap[idKey] ?? productCostMap[nameKey] ?? 0;
-    const itemCost = unitCost * qty;
-    totalCost += itemCost;
+    items.forEach((item) => {
+      const name = item.productName || item.name || "Món không tên";
+      const qty = Number(item.quantity || 1);
+      const rawSub = Number(item.subtotal || item.total || Number(item.unitPrice || item.price || 0) * qty);
+      const netRevenue = Math.max(0, Math.round(rawSub * discountRatio));
+      const idKey = String(item.productId || item.id || "");
+      const nameKey = String(name || "").trim().toLowerCase();
 
-    // Xác định nhóm hàng
-    const category = productCategoryMap[idKey] || productCategoryMap[nameKey] || "Khác";
+      // Tính giá vốn món
+      const unitCost = productCostMap[idKey] ?? productCostMap[nameKey] ?? 0;
+      const itemCost = unitCost * qty;
+      totalCost += itemCost;
 
-    // Mặt hàng bán chạy
-    if (!topProducts[name]) {
-      topProducts[name] = { quantity: 0, revenue: 0, cost: 0 };
-    }
-    topProducts[name].quantity += qty;
-    topProducts[name].revenue += sub;
-    topProducts[name].cost += itemCost;
+      // Xác định nhóm hàng
+      const category = productCategoryMap[idKey] || productCategoryMap[nameKey] || "Khác";
 
-    // Nhóm hàng bán chạy
-    if (!topCategories[category]) {
-      topCategories[category] = { quantity: 0, revenue: 0, cost: 0 };
-    }
-    topCategories[category].quantity += qty;
-    topCategories[category].revenue += sub;
-    topCategories[category].cost += itemCost;
+      // Mặt hàng bán chạy
+      if (!topProducts[name]) {
+        topProducts[name] = { quantity: 0, revenue: 0, cost: 0 };
+      }
+      topProducts[name].quantity += qty;
+      topProducts[name].revenue += netRevenue;
+      topProducts[name].cost += itemCost;
+
+      // Nhóm hàng bán chạy
+      if (!topCategories[category]) {
+        topCategories[category] = { quantity: 0, revenue: 0, cost: 0 };
+      }
+      topCategories[category].quantity += qty;
+      topCategories[category].revenue += netRevenue;
+      topCategories[category].cost += itemCost;
+    });
   });
 
   const topProductsArray = Object.entries(topProducts)
@@ -340,13 +326,14 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
     .slice(0, 10);
 
   const revenueByDate = {};
-  filteredPayments.forEach((p) => {
-    if (!p.paidAt) return;
-    const d = new Date(p.paidAt);
+  validFilteredOrders.forEach((ord) => {
+    const createdStr = ord.createdAt || ord.paidAt;
+    if (!createdStr) return;
+    const d = new Date(createdStr);
     if (Number.isNaN(d.getTime())) return;
     const vnDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
     const dateKey = vnDate.toISOString().split("T")[0];
-    const amount = Number(p.amount) || 0;
+    const amount = Number(ord.grandTotal ?? (Number(ord.subtotal || 0) - Number(ord.discount || 0))) || 0;
     revenueByDate[dateKey] = (revenueByDate[dateKey] || 0) + amount;
   });
 
@@ -368,7 +355,7 @@ const calculateReportLocally = (range, customStart = "", customEnd = "") => {
     totalCost,
     netProfit,
     profitMargin,
-    orderCount: filteredOrders.length,
+    orderCount: validFilteredOrders.length,
     paymentMethods: paymentMethodsArray,
     topProducts: topProductsArray,
     topCategories: topCategoriesArray,
@@ -487,7 +474,7 @@ export default function DashboardPage() {
   const isLoading = storeState.loading;
   const error = storeState.error || "";
 
-  // Prepare pie chart data
+  // Prepare pie chart data: Nhóm hàng bán chạy nhất tính theo SỐ LƯỢNG (value: c.quantity)
   const paymentPieData =
     report?.paymentMethods?.map((m) => ({
       label: m.method,
@@ -497,7 +484,7 @@ export default function DashboardPage() {
   const categoryPieData =
     report?.topCategories?.map((c) => ({
       label: c.categoryName,
-      value: c.revenue || 0,
+      value: c.quantity || 0,
     })) || [];
 
   if (isLoading && !report) {

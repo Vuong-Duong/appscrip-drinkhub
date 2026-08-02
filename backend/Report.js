@@ -123,16 +123,21 @@ const getReportData = (filters = {}) => {
     const topProducts = {};
     validFilteredOrders.forEach((order) => {
       const items = Array.isArray(order.items) ? order.items : [];
+      const orderSubtotal = toNumberSafe_(order.subtotal, 0);
+      const orderDiscount = toNumberSafe_(order.discount, 0);
+      const discountRatio = orderSubtotal > 0 ? 1 - orderDiscount / orderSubtotal : 1;
+
       items.forEach((item) => {
         const productName = trimSafe_(item.productName) || "Unknown";
         const quantity = toNumberSafe_(item.quantity, 0);
-        const subtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
+        const itemSubtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
+        const netRevenue = Math.max(0, Math.round(itemSubtotal * discountRatio));
 
         if (!topProducts[productName]) {
           topProducts[productName] = { quantity: 0, revenue: 0 };
         }
         topProducts[productName].quantity += quantity;
-        topProducts[productName].revenue += subtotal;
+        topProducts[productName].revenue += netRevenue;
       });
     });
 
@@ -167,12 +172,17 @@ const getReportData = (filters = {}) => {
     const topCategories = {};
     validFilteredOrders.forEach((order) => {
       const items = Array.isArray(order.items) ? order.items : [];
+      const orderSubtotal = toNumberSafe_(order.subtotal, 0);
+      const orderDiscount = toNumberSafe_(order.discount, 0);
+      const discountRatio = orderSubtotal > 0 ? 1 - orderDiscount / orderSubtotal : 1;
+
       items.forEach((item) => {
         const productId = trimSafe_(item.productId);
         const productNameKey = trimSafe_(item.productName || item.name).toLowerCase();
         const category = productCategoryMap[productId] || productCategoryMap[productNameKey] || "Khác";
         const quantity = toNumberSafe_(item.quantity, 0);
-        const subtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
+        const itemSubtotal = toNumberSafe_(item.subtotal || item.unitPrice * item.quantity, 0);
+        const netRevenue = Math.max(0, Math.round(itemSubtotal * discountRatio));
         const unitCost = productCostMap[productId] ?? productCostMap[productNameKey] ?? 0;
 
         totalCost += unitCost * quantity;
@@ -181,7 +191,7 @@ const getReportData = (filters = {}) => {
           topCategories[category] = { quantity: 0, revenue: 0 };
         }
         topCategories[category].quantity += quantity;
-        topCategories[category].revenue += subtotal;
+        topCategories[category].revenue += netRevenue;
       });
     });
 

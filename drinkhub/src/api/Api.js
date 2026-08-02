@@ -709,29 +709,38 @@ export const orderApi = {
     const normItems = normalizeOrderPayload({ items }).items;
     const orders = appStore.get("orders") || [];
     const existing = orders.find((o) => String(o.id) === String(orderId));
-    let updatedOrder = null;
 
     if (existing) {
       const updatedItems = [...(existing.items || []), ...normItems];
-      updatedOrder = {
-        ...existing,
-        items: updatedItems,
-        updatedAt: new Date().toISOString(),
-      };
-      appStore.update("orders", updatedOrder, true);
+      const newItemsSubtotal = normItems.reduce(
+        (sum, item) => sum + (Number(item.subtotal) || 0),
+        0,
+      );
+      const newSubtotal = (Number(existing.subtotal) || 0) + newItemsSubtotal;
+      const safeDiscount =
+        discount !== undefined && discount !== null
+          ? Number(discount) || 0
+          : Number(existing.discount) || 0;
+      appStore.update(
+        "orders",
+        {
+          ...existing,
+          items: updatedItems,
+          subtotal: newSubtotal,
+          discount: safeDiscount,
+          grandTotal: newSubtotal - safeDiscount,
+          updatedAt: new Date().toISOString(),
+        },
+        true,
+      );
     }
 
-    // Send to backend — return real promise for server result
+    // Send to backend — return real promise, DO NOT swallow errors
     return request("ADD_ITEMS_TO_ORDER", {
       orderId,
       items: normItems,
       discount,
-    })
-      .then((result) => result || updatedOrder || { success: true })
-      .catch((err) => {
-        console.warn("ADD_ITEMS_TO_ORDER failed:", err);
-        return updatedOrder || { success: true };
-      });
+    });
   },
 
   getOrderByTicket(ticketId) {
@@ -742,7 +751,7 @@ export const orderApi = {
     const user = getStoredAuthUser();
     if (!user || user.role !== "admin") {
       return Promise.reject(
-        new Error("PERMISSION_DENIED: Chỉ Admin/Owner mới có quyền xóa Order")
+        new Error("PERMISSION_DENIED: Chỉ Admin/Owner mới có quyền xóa Order"),
       );
     }
 
@@ -752,26 +761,19 @@ export const orderApi = {
     if (targetOrder && targetOrder.tableId) {
       appStore.update(
         "tables",
-        {
-          id: String(targetOrder.tableId),
-          status: "available",
-        },
-        true
+        { id: String(targetOrder.tableId), status: "available" },
+        true,
       );
     }
 
-    // 1. Instantly update AppStore (0ms)
+    // 1. Instantly update AppStore
     appStore.remove("orders", orderId, true);
 
-    // 2. Fire-and-forget to backend (non-blocking)
-    request("DELETE_ORDER", {
+    // 2. Await backend to ensure orders + order_snapshots + payments are all deleted
+    return request("DELETE_ORDER", {
       orderId,
       userRole: user.role,
-    }).catch((err) => {
-      console.warn("Background DELETE_ORDER failed:", err);
     });
-
-    return Promise.resolve({ success: true, id: orderId });
   },
 };
 

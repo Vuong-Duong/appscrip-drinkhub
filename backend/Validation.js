@@ -21,12 +21,12 @@ const validateOrderPayload = (payload) => {
     errors.push("all items must have productId and quantity > 0");
   }
 
-  if (toNumberSafe_(payload.grandTotal) <= 0) {
-    errors.push("grandTotal must be > 0");
+  if (toNumberSafe_(payload.grandTotal) < 0) {
+    errors.push("grandTotal cannot be negative");
   }
 
-  if (toNumberSafe_(payload.subtotal) <= 0) {
-    errors.push("subtotal must be > 0");
+  if (toNumberSafe_(payload.subtotal) < 0) {
+    errors.push("subtotal cannot be negative");
   }
 
   const expectedGrandTotal =

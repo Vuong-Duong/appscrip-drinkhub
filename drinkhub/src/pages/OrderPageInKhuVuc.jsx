@@ -148,6 +148,33 @@ export default function OrderPage() {
     };
   }, [selectedTable, storeState.orders, storeState.orderDetails]);
 
+  // Fetch order from server when table is occupied but local doesn't have the order
+  useEffect(() => {
+    if (!selectedTable?.currentOrderId) return;
+    if (existingOrder) return; // Already have it locally
+    if (!isOccupied) return;
+
+    // Local missing → fetch from server by tableId (ticket)
+    orderApi
+      .getOrderByTicket(decodedTableId)
+      .then((serverOrder) => {
+        if (serverOrder && serverOrder.id) {
+          appStore.add("orders", serverOrder, true);
+          // Also update table's currentOrderId if different
+          if (String(serverOrder.id) !== String(selectedTable.currentOrderId)) {
+            appStore.update(
+              "tables",
+              { id: String(decodedTableId), currentOrderId: serverOrder.id },
+              true,
+            );
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn("Failed to fetch existing order from server:", err);
+      });
+  }, [selectedTable?.currentOrderId, existingOrder, isOccupied, decodedTableId]);
+
   const hasExistingOrder = Boolean(existingOrder);
 
   const toppingProducts = useMemo(() => {
@@ -665,7 +692,7 @@ export default function OrderPage() {
       const orderId = existingOrder.id;
       const newItems = cart.map(mapCartItemToOrderItem);
 
-      // 1. Instantly update AppStore
+      // 1. Instantly update orderDetails in AppStore (order.items handled by orderApi.addItems)
       const tempDetails = newItems.map((item) => ({
         id: `detail_local_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         orderId: orderId,
@@ -679,28 +706,6 @@ export default function OrderPage() {
       const currentDetails = appStore.get("orderDetails") || [];
       appStore.set("orderDetails", [...currentDetails, ...tempDetails]);
 
-      const currentOrders = appStore.get("orders") || [];
-      const targetOrder = currentOrders.find((o) => o.id === orderId);
-      const existingOrderItems = Array.isArray(targetOrder?.items)
-        ? targetOrder.items
-        : [];
-      const updatedOrderItems = [...existingOrderItems, ...newItems];
-
-      appStore.set(
-        "orders",
-        currentOrders.map((o) =>
-          o.id === orderId
-            ? {
-                ...o,
-                items: updatedOrderItems,
-                subtotal: (Number(o.subtotal) || 0) + cartSubtotal,
-                discount: safeDiscount,
-                grandTotal: (Number(o.subtotal) || 0) + cartSubtotal - safeDiscount,
-              }
-            : o,
-        ),
-      );
-
       // Local stock reduction
       const updatedProducts = products.map((p) => {
         const cartItem = cart.find((c) => c.id === p.id);
@@ -713,22 +718,11 @@ export default function OrderPage() {
       // Print slip immediately
       printCurrentCartReceipt(orderId, false);
 
-      // 2. Trigger background sync
+      // 2. Send to server (orderApi.addItems handles local order.items update + backend sync)
       orderApi
         .addItems(orderId, newItems, safeDiscount)
         .then((result) => {
-          // result is the full updated order from server
-          const latestOrders = appStore.get("orders") || [];
-          const updatedOrders = latestOrders.map((o) =>
-            o.id === orderId
-              ? {
-                  ...o,
-                  ...(result || {}),
-                }
-              : o,
-          );
-          appStore.set("orders", updatedOrders);
-
+          // Sync orderDetails from server result
           if (result && Array.isArray(result.items)) {
             const latestDetails = appStore.get("orderDetails") || [];
             const otherDetails = latestDetails.filter(
