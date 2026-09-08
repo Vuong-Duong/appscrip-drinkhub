@@ -22,18 +22,56 @@ const formatTimeVN = (dateVal) => {
   return `${hour}:${minute}`;
 };
 
-// Main print receipt handler
+// Main print receipt handler — in thẳng máy in nhiệt bằng hidden iframe, không nhảy tab mới (about:blank)
 export const printReceipt = (order, table, restaurant, type = "payment_receipt") => {
   const receiptContent = generateReceiptHTML(order, table, restaurant, type);
 
-  const printWindow = window.open("", "_blank", "height=800,width=600");
-  printWindow.document.write(receiptContent);
-  printWindow.document.close();
+  // Xóa iframe in cũ nếu có
+  const oldFrame = document.getElementById("receipt-print-iframe");
+  if (oldFrame) {
+    try { oldFrame.remove(); } catch (_) {}
+  }
 
-  // Trigger print dialog after DOM rendering
-  setTimeout(() => {
-    printWindow.print();
-  }, 500);
+  // Tạo iframe ẩn trực tiếp trên trang để không bị bật tab mới trên Android Chrome
+  const iframe = document.createElement("iframe");
+  iframe.id = "receipt-print-iframe";
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0px";
+  iframe.style.height = "0px";
+  iframe.style.border = "none";
+  iframe.style.visibility = "hidden";
+  iframe.style.zIndex = "-9999";
+  document.body.appendChild(iframe);
+
+  try {
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(receiptContent);
+    doc.close();
+
+    // Chờ nội dung render xong rồi gọi print
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        console.error("Lỗi khi gọi print qua iframe:", err);
+      } finally {
+        // Tự động dọn dẹp iframe sau 10 giây
+        setTimeout(() => {
+          try {
+            if (iframe && iframe.parentNode) {
+              iframe.parentNode.removeChild(iframe);
+            }
+          } catch (_) {}
+        }, 10000);
+      }
+    }, 300);
+  } catch (e) {
+    console.error("Lỗi khởi tạo tài liệu in:", e);
+  }
 };
 
 // Helper render Topping và Note cho receipt
@@ -43,10 +81,10 @@ const getItemDetailsHTML = (item, isSlip = false) => {
     const toppingsText = item.toppings
       .map(
         (t) =>
-          `+ ${t.name || t.productName} (x${t.quantity || 1})${!isSlip && Number(t.price || 0) > 0 ? ` (+${Number(t.price).toLocaleString()}đ)` : ""}`,
+          `+ ${t.name || t.productName} (x${t.quantity || 1})${!isSlip && Number(t.price || 0) > 0 ? ` (+${Number(t.price).toLocaleString()}d)` : ""}`,
       )
       .join("<br/>");
-    html += `<div style="font-size: 11px; color: #444; padding-left: 8px; margin-top: 2px;">${toppingsText}</div>`;
+    html += `<div style="font-size:10px;color:#444;padding-left:6px;margin-top:1px;">${toppingsText}</div>`;
   }
 
   const notesList = Array.isArray(item.notes) ? item.notes : [];
@@ -55,7 +93,7 @@ const getItemDetailsHTML = (item, isSlip = false) => {
   if (customNoteStr) allNotes.push(customNoteStr);
 
   if (allNotes.length > 0) {
-    html += `<div style="font-size: 11px; font-style: italic; color: #d97706; padding-left: 8px; margin-top: 2px;">📝 ${allNotes.join(", ")}</div>`;
+    html += `<div style="font-size:10px;font-style:italic;color:#555;padding-left:6px;margin-top:1px;">* ${allNotes.join(", ")}</div>`;
   }
 
   return html;
@@ -64,8 +102,8 @@ const getItemDetailsHTML = (item, isSlip = false) => {
 // Generates HTML for single receipt body
 function generateSingleReceiptBodyHTML(order, table, restaurant, singleType) {
   const storeName = restaurant?.name || "Longka Cafe";
-  const storeAddress = restaurant?.address || "Địa chỉ cửa hàng";
-  const storePhone = restaurant?.phone || "Số điện thoại";
+  const storeAddress = restaurant?.address || "";
+  const storePhone = restaurant?.phone || "";
 
   const createdBy = order.createdBy || "Staff";
   const formattedTime = formatTimeVN(order.createdAt);
@@ -81,38 +119,38 @@ function generateSingleReceiptBodyHTML(order, table, restaurant, singleType) {
     // === PHIẾU ĐẶT ĐỒ (Bếp / Pha chế) ===
     const itemsRows = (order.items || []).map(item => `
       <tr>
-        <td style="border: 1px solid #000; text-align: left; padding: 6px 8px;">
-          <div style="font-weight: bold;">${item.name || item.productName}</div>
+        <td style="border:1px solid #000;text-align:left;padding:4px 5px;">
+          <div style="font-weight:bold;">${item.name || item.productName}</div>
           ${getItemDetailsHTML(item, true)}
         </td>
-        <td style="border: 1px solid #000; text-align: center; padding: 6px 4px; font-weight: bold; vertical-align: top;">${item.quantity}</td>
-        <td style="border: 1px solid #000; text-align: center; padding: 6px 4px; vertical-align: top;">MON</td>
+        <td style="border:1px solid #000;text-align:center;padding:4px 3px;font-weight:bold;vertical-align:top;">${item.quantity}</td>
+        <td style="border:1px solid #000;text-align:center;padding:4px 3px;vertical-align:top;">MON</td>
       </tr>
     `).join("");
 
     return `
-      <div class="receipt-title">PHIẾU ĐẶT ĐỒ</div>
-      <div class="receipt-subtitle">${tableNumOnly} - BÀN - HĐ.${order.id || "N/A"}</div>
-      
-      <table class="info-table" style="width: 100%; margin-top: 15px; margin-bottom: 10px; border-collapse: collapse;">
+      <div class="receipt-title">PHIEU DAT DO</div>
+      <div class="receipt-subtitle">BAN ${tableNumOnly} - HD.${order.id || "N/A"}</div>
+
+      <table style="width:100%;margin:8px 0 6px;border-collapse:collapse;">
         <tr>
-          <td style="text-align: left; padding: 3px 0; font-weight: bold;">Giờ : ${formattedTime}</td>
-          <td style="text-align: right; padding: 3px 0; font-weight: bold;">Ngày: ${formattedDateText}</td>
+          <td style="padding:2px 0;font-weight:bold;">Gio : ${formattedTime}</td>
+          <td style="text-align:right;padding:2px 0;font-weight:bold;">${formattedDateText}</td>
         </tr>
         <tr>
-          <td colspan="2" style="text-align: left; padding: 3px 0; font-weight: bold;">Nhân viên: ${createdBy}</td>
+          <td colspan="2" style="padding:2px 0;font-weight:bold;">NV: ${createdBy}</td>
         </tr>
         <tr>
-          <td colspan="2" style="text-align: left; padding: 3px 0; font-weight: bold;">Số thứ tự: ${seq} (SL : ${totalQty})</td>
+          <td colspan="2" style="padding:2px 0;font-weight:bold;">STT: ${seq} (SL: ${totalQty})</td>
         </tr>
       </table>
 
-      <table class="items-table-slip" style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px;">
+      <table style="width:100%;border-collapse:collapse;margin:6px 0 10px;">
         <thead>
           <tr>
-            <th style="border: 1px solid #000; text-align: center; padding: 6px 8px; background-color: #f2f2f2; width: 60%;">Tên món</th>
-            <th style="border: 1px solid #000; text-align: center; padding: 6px 4px; background-color: #f2f2f2; width: 20%;">SL</th>
-            <th style="border: 1px solid #000; text-align: center; padding: 6px 4px; background-color: #f2f2f2; width: 20%;">ĐVT</th>
+            <th style="border:1px solid #000;text-align:center;padding:4px 5px;width:60%;">Ten mon</th>
+            <th style="border:1px solid #000;text-align:center;padding:4px 3px;width:20%;">SL</th>
+            <th style="border:1px solid #000;text-align:center;padding:4px 3px;width:20%;">DVT</th>
           </tr>
         </thead>
         <tbody>
@@ -123,90 +161,91 @@ function generateSingleReceiptBodyHTML(order, table, restaurant, singleType) {
   } else {
     // === HÓA ĐƠN THANH TOÁN ===
     const shortId = order.id ? order.id.slice(-5).toUpperCase() : "N/A";
-    
+
     const itemsRows = (order.items || []).map((item, idx) => `
       <tr>
-        <td style="padding: 6px 0; text-align: center; vertical-align: top;">${idx + 1}</td>
-        <td style="padding: 6px 0; text-align: left;">
-          <div style="font-weight: bold;">${item.name || item.productName}</div>
+        <td style="padding:4px 0;text-align:center;vertical-align:top;">${idx + 1}</td>
+        <td style="padding:4px 0;text-align:left;">
+          <div style="font-weight:bold;">${item.name || item.productName}</div>
           ${getItemDetailsHTML(item, false)}
         </td>
-        <td style="padding: 6px 0; text-align: center; font-weight: bold; vertical-align: top;">${item.quantity}</td>
-        <td style="padding: 6px 0; text-align: right; vertical-align: top;">${Number(item.price || item.unitPrice || 0).toLocaleString()}</td>
-        <td style="padding: 6px 0; text-align: right; font-weight: bold; vertical-align: top;">${Number(item.total || item.subtotal || 0).toLocaleString()}</td>
+        <td style="padding:4px 0;text-align:center;font-weight:bold;vertical-align:top;">${item.quantity}</td>
+        <td style="padding:4px 0;text-align:right;vertical-align:top;">${Number(item.total || item.subtotal || 0).toLocaleString()}</td>
       </tr>
     `).join("");
 
-    const payMethodText = order.paymentMethod === "cash" ? "Thanh toán tiền mặt" : "Thanh toán chuyển khoản";
+    const payMethodText = order.paymentMethod === "cash" ? "Tien mat" : "Chuyen khoan";
     const subtotalVal = order.subtotal || 0;
     const discountVal = order.discount || 0;
     const totalVal = order.total !== undefined ? order.total : (order.grandTotal || 0);
 
     return `
-      <div class="receipt-title">HÓA ĐƠN THANH TOÁN</div>
-      <div class="receipt-subtitle" style="font-size: 14px; font-weight: bold; margin-bottom: 15px;">SỐ HĐ: ${order.id || "N/A"}</div>
-      
-      <table class="info-table-payment" style="width: 100%; border-collapse: collapse; margin-bottom: 12px; font-weight: bold;">
+      <div class="receipt-title">HOA DON THANH TOAN</div>
+      <div class="receipt-subtitle">So HD: ${order.id || "N/A"}</div>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-weight:bold;">
         <tr>
-          <td style="width: 55%; padding: 2px 0;">Mã HĐ: #${shortId}</td>
-          <td style="width: 45%; padding: 2px 0; text-align: left;">TN: ${createdBy}</td>
+          <td style="padding:2px 0;">Ma: #${shortId}</td>
+          <td style="text-align:right;padding:2px 0;">TN: ${createdBy}</td>
         </tr>
         <tr>
-          <td style="padding: 2px 0;">Bàn: ${tableNumOnly} - Bàn</td>
-          <td style="padding: 2px 0; text-align: left;">Ngày: ${formattedDate}</td>
+          <td style="padding:2px 0;">Ban: ${tableNumOnly}</td>
+          <td style="text-align:right;padding:2px 0;">Ngay: ${formattedDate}</td>
         </tr>
         <tr>
-          <td style="padding: 2px 0;">Giờ vào: : ${formattedTime}</td>
-          <td style="padding: 2px 0; text-align: left;">Giờ ra: ${formatTimeVN(new Date())}</td>
+          <td style="padding:2px 0;">Gio vao: ${formattedTime}</td>
+          <td style="text-align:right;padding:2px 0;">Gio ra: ${formatTimeVN(new Date())}</td>
         </tr>
       </table>
 
-      <table class="items-table-payment" style="width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; border-top: 1px solid #000; border-bottom: 1px solid #000;">
-        <thead>
-          <tr style="border-bottom: 1px solid #000;">
-            <th style="padding: 6px 0; text-align: center; width: 10%;">STT</th>
-            <th style="padding: 6px 0; text-align: left; width: 45%;">Tên món</th>
-            <th style="padding: 6px 0; text-align: center; width: 10%;">SL</th>
-            <th style="padding: 6px 0; text-align: right; width: 15%;">Đơn giá</th>
-            <th style="padding: 6px 0; text-align: right; width: 20%;">Thành tiền</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itemsRows}
-        </tbody>
-      </table>
+      <div style="border-top:1px solid #000;border-bottom:1px solid #000;margin:6px 0;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid #000;">
+              <th style="padding:4px 0;text-align:center;width:8%;">STT</th>
+              <th style="padding:4px 0;text-align:left;width:52%;">Ten mon</th>
+              <th style="padding:4px 0;text-align:center;width:8%;">SL</th>
+              <th style="padding:4px 0;text-align:right;width:32%;">T.Tien</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRows}
+          </tbody>
+        </table>
+      </div>
 
-      <table class="summary-table" style="width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 15px; font-weight: bold;">
+      <table style="width:100%;border-collapse:collapse;margin:6px 0 10px;font-weight:bold;">
         <tr>
-          <td style="padding: 4px 0;">Thành tiền:</td>
-          <td style="padding: 4px 0; text-align: right;">${subtotalVal.toLocaleString()} đ</td>
+          <td style="padding:3px 0;">Thanh tien:</td>
+          <td style="padding:3px 0;text-align:right;">${subtotalVal.toLocaleString()} d</td>
         </tr>
         ${discountVal > 0 ? `
         <tr>
-          <td style="padding: 4px 0; color: #ff0000;">Giảm giá:</td>
-          <td style="padding: 4px 0; text-align: right; color: #ff0000;">-${discountVal.toLocaleString()} đ</td>
+          <td style="padding:3px 0;">Giam gia:</td>
+          <td style="padding:3px 0;text-align:right;">-${discountVal.toLocaleString()} d</td>
         </tr>
         ` : ""}
-        <tr style="border-top: 1px solid #000; font-size: 15px;">
-          <td style="padding: 8px 0; font-size: 16px;">Tổng tiền:</td>
-          <td style="padding: 8px 0; text-align: right; font-size: 16px;">${totalVal.toLocaleString()} đ</td>
+        <tr style="border-top:1px solid #000;">
+          <td style="padding:5px 0;font-size:14px;">TONG TIEN:</td>
+          <td style="padding:5px 0;text-align:right;font-size:14px;">${totalVal.toLocaleString()} d</td>
         </tr>
         <tr>
-          <td style="padding: 4px 0; font-size: 13px;">+${payMethodText}</td>
-          <td style="padding: 4px 0; text-align: right; font-size: 13px;">${totalVal.toLocaleString()} đ</td>
+          <td colspan="2" style="padding:3px 0;font-size:11px;">+ ${payMethodText}: ${totalVal.toLocaleString()} d</td>
         </tr>
       </table>
 
-      <div class="store-footer-details" style="text-align: center; margin-top: 20px; font-weight: bold; font-size: 13px;">
-        <div>${storeName}</div>
-        <div style="font-size: 12px; margin-top: 3px; font-weight: normal;">Địa chỉ: ${storeAddress}</div>
-        ${storePhone && storePhone !== "Số điện thoại" ? `<div style="font-size: 12px; font-weight: normal;">SĐT: ${storePhone}</div>` : ""}
+      ${(storeName || storeAddress || storePhone) ? `
+      <div style="text-align:center;margin-top:12px;font-size:11px;border-top:1px dashed #000;padding-top:6px;">
+        <div style="font-weight:bold;">${storeName}</div>
+        ${storeAddress ? `<div>${storeAddress}</div>` : ""}
+        ${storePhone && storePhone !== "Số điện thoại" ? `<div>SDT: ${storePhone}</div>` : ""}
       </div>
+      ` : ""}
     `;
   }
 }
 
-// Generates HTML for receipt matching the images
+// Generates complete HTML document for 58mm thermal printer
 function generateReceiptHTML(order, table, restaurant, type) {
   let types = [];
   if (Array.isArray(type)) {
@@ -221,174 +260,72 @@ function generateReceiptHTML(order, table, restaurant, type) {
     generateSingleReceiptBodyHTML(order, table, restaurant, t)
   );
 
+  // Dùng page-break-after thay vì page-break-before để phân trang đúng
   const bodyHTML = bodies.join(
-    '<div class="receipt-divider" style="page-break-before: always; margin: 30px 0; border-top: 2px dashed #666; padding-top: 20px;"></div>'
+    '<div style="page-break-after:always;"></div>'
   );
 
-  // Combine into complete, beautifully styled HTML document
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>In Hóa Đơn</title>
+  <title>In phieu</title>
   <style>
-    /* Styling for screen preview */
-    body {
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 13px;
-      line-height: 1.4;
+    /* ===== 58mm Thermal Printer Styles ===== */
+    * {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
-      background-color: #f3f4f6;
-      color: #000;
-    }
-    
-    .screen-header-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background-color: #1e293b;
-      color: #fff;
-      padding: 12px 24px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    
-    .screen-header-title {
-      font-weight: 700;
-      font-size: 15px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .screen-actions {
-      display: flex;
-      gap: 12px;
-    }
-    
-    .action-btn {
-      padding: 8px 16px;
-      border-radius: 6px;
-      border: none;
-      font-weight: 600;
-      font-size: 13px;
-      cursor: pointer;
-      transition: all 0.15s ease-in-out;
-    }
-    
-    .btn-pdf {
-      background-color: #ef4444;
-      color: white;
-    }
-    
-    .btn-pdf:hover {
-      background-color: #dc2626;
-    }
-    
-    .btn-close {
-      background-color: #64748b;
-      color: white;
-    }
-    
-    .btn-close:hover {
-      background-color: #475569;
-    }
-    
-    .paper-container {
-      max-width: 400px;
-      margin: 30px auto;
-      background-color: #fff;
-      padding: 24px;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-      border-radius: 4px;
-      border: 1px solid #e5e7eb;
-    }
-    
-    .receipt {
-      width: 100%;
-    }
-    
-    .receipt-title {
-      font-size: 19px;
-      font-weight: bold;
-      text-align: center;
-      margin-bottom: 5px;
-      letter-spacing: 0.5px;
-    }
-    
-    .receipt-subtitle {
-      text-align: center;
-      font-size: 15px;
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
-    
-    .footer-brand {
-      text-align: center;
-      font-size: 11px;
-      margin-top: 25px;
-      border-top: 1px dashed #ccc;
-      padding-top: 8px;
     }
 
-    /* Print styles */
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      color: #000;
+      background: #fff;
+      width: 58mm;
+    }
+
+    .receipt-title {
+      font-size: 14px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 3px;
+      letter-spacing: 0.5px;
+    }
+
+    .receipt-subtitle {
+      text-align: center;
+      font-size: 12px;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
     @media print {
-      body {
-        background-color: #fff !important;
-        color: #000 !important;
-      }
-      .screen-header-bar {
-        display: none !important;
-      }
-      .paper-container {
-        box-shadow: none !important;
-        border: none !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        max-width: 100% !important;
-      }
-      .receipt-divider {
-        page-break-before: always !important;
-        border: none !important;
-        margin: 0 !important;
-        padding: 0 !important;
+      html, body {
+        width: 58mm;
+        margin: 0;
+        padding: 0;
+        background: #fff;
       }
       @page {
-        margin: 0;
+        size: 58mm auto;
+        margin: 2mm 1mm;
       }
     }
   </style>
 </head>
 <body>
-
-  <!-- Screen preview header bar (hidden when printing) -->
-  <div class="screen-header-bar">
-    <div class="screen-header-title">
-      📄 Xem trước Hóa đơn (Print/PDF Preview)
-    </div>
-    <div class="screen-actions">
-      <button class="action-btn btn-pdf" onclick="window.print()">
-        🖨️ In hóa đơn / Lưu PDF
-      </button>
-      <button class="action-btn btn-close" onclick="window.close()">
-        Đóng
-      </button>
-    </div>
+  ${bodyHTML}
+  <div style="text-align:center;font-size:10px;margin-top:10px;border-top:1px dashed #aaa;padding-top:4px;">
+    Cam on quy khach!
   </div>
-
-  <!-- Thermal receipt mockup -->
-  <div class="paper-container">
-    <div class="receipt">
-      ${bodyHTML}
-      <div class="footer-brand">
-        Powered by LongKa
-      </div>
-    </div>
-  </div>
-
 </body>
-</html>
-  `;
+</html>`;
 }

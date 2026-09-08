@@ -232,20 +232,10 @@ export default function OrderPage() {
       toppings: [],
       notes: [],
       customNote: "",
-      stock: product.stock,
     };
 
     setCart((prev) => {
-      const totalSameProductQty = prev
-        .filter((item) => String(item.id || item.productId) === String(product.id))
-        .reduce((sum, i) => sum + i.quantity, 0);
-
-      if (totalSameProductQty + 1 > product.stock) {
-        setError(`Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`);
-        return prev;
-      }
       setError("");
-
       const existingIndex = prev.findIndex((item) => areItemsEqual(item, newItemCandidate));
       if (existingIndex !== -1) {
         return prev.map((item, idx) =>
@@ -263,20 +253,8 @@ export default function OrderPage() {
       const item = prev[itemIndex];
       if (!item) return prev;
 
-      const product = products.find((p) => String(p.id) === String(item.id || item.productId));
-      const newQty = item.quantity + delta;
-
-      if (delta > 0 && product) {
-        const totalSameProductQty = prev
-          .filter((i) => String(i.id || i.productId) === String(product.id))
-          .reduce((sum, i) => sum + i.quantity, 0);
-
-        if (totalSameProductQty + delta > product.stock) {
-          setError(`Món "${product.name}" không đủ tồn kho (Tồn: ${product.stock})`);
-          return prev;
-        }
-      }
       setError("");
+      const newQty = item.quantity + delta;
 
       if (newQty <= 0) {
         return prev.filter((_, idx) => idx !== itemIndex);
@@ -591,14 +569,6 @@ export default function OrderPage() {
         ),
       );
 
-      // Trigger local stock reduction
-      const updatedProducts = products.map((p) => {
-        const cartItem = cart.find((c) => c.id === p.id);
-        return cartItem
-          ? { ...p, stock: Math.max(0, p.stock - cartItem.quantity) }
-          : p;
-      });
-      appStore.set("products", updatedProducts);
 
       // Trigger local discount usage increment
       if (appliedDiscountCode && safeDiscount > 0) {
@@ -706,14 +676,6 @@ export default function OrderPage() {
       const currentDetails = appStore.get("orderDetails") || [];
       appStore.set("orderDetails", [...currentDetails, ...tempDetails]);
 
-      // Local stock reduction
-      const updatedProducts = products.map((p) => {
-        const cartItem = cart.find((c) => c.id === p.id);
-        return cartItem
-          ? { ...p, stock: Math.max(0, p.stock - cartItem.quantity) }
-          : p;
-      });
-      appStore.set("products", updatedProducts);
 
       // Print slip immediately
       printCurrentCartReceipt(orderId, false);
@@ -805,15 +767,6 @@ export default function OrderPage() {
         ),
       );
     }
-
-    // Restore stock
-    const updatedProducts = products.map((p) => {
-      if (p.id === item.productId) {
-        return { ...p, stock: p.stock + item.quantity };
-      }
-      return p;
-    });
-    appStore.set("products", updatedProducts);
 
     showToast(`Đã xóa "${item.productName}" khỏi đơn hàng`);
   };
@@ -947,20 +900,14 @@ export default function OrderPage() {
                       </div>
                     )}
 
-                    {/* Stock badge */}
-                    <div className="absolute top-2.5 right-2.5">
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          item.stock > 5
-                            ? "bg-green-50 text-green-700 border border-green-200"
-                            : item.stock > 0
-                              ? "bg-amber-50 text-amber-700 border border-amber-200"
-                              : "bg-red-50 text-red-700 border border-red-200"
-                        }`}
-                      >
-                        Tồn: {item.stock}
-                      </span>
-                    </div>
+                    {/* Status badge - show INACTIVE as Hết món */}
+                    {item.status === "INACTIVE" && (
+                      <div className="absolute top-2.5 right-2.5">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+                          Hết món
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Info container */}
@@ -1604,20 +1551,14 @@ export default function OrderPage() {
                         {product.name}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {product.category} &bull; Tồn:{" "}
-                        <span
-                          className={
-                            product.stock === 0
-                              ? "text-red-500 font-bold"
-                              : "text-gray-700 font-semibold"
-                          }
-                        >
-                          {product.stock}
-                        </span>
+                        {product.category}
+                        {product.status === "INACTIVE" && (
+                          <span className="ml-2 text-red-600 font-semibold">• Đang hết</span>
+                        )}
                       </p>
                     </div>
                     <div>
-                      {product.stock > 0 ? (
+                      {product.status !== "INACTIVE" ? (
                         <button
                           onClick={() => {
                             setConfirmOutOfStock({ isOpen: true, product });
@@ -1629,27 +1570,14 @@ export default function OrderPage() {
                       ) : (
                         <button
                           onClick={async () => {
-                            const newStockStr = prompt(
-                              `Nhập số lượng tồn kho mới cho "${product.name}":`,
-                              "100",
-                            );
-                            if (newStockStr !== null) {
-                              const qty = parseInt(newStockStr, 10);
-                              if (!isNaN(qty) && qty >= 0) {
-                                try {
-                                  await CrudService.update("products", {
-                                    ...product,
-                                    stock: qty,
-                                  });
-                                  showToast(
-                                    `Đã cập nhật lại tồn kho món "${product.name}" thành ${qty}!`,
-                                  );
-                                } catch (err) {
-                                  showToast(`Lỗi: ${err.message}`, "error");
-                                }
-                              } else {
-                                showToast("Số lượng không hợp lệ!", "error");
-                              }
+                            try {
+                              await CrudService.update("products", {
+                                ...product,
+                                status: "ACTIVE",
+                              });
+                              showToast(`Đã mở lại món "${product.name}"!`);
+                            } catch (err) {
+                              showToast(`Lỗi: ${err.message}`, "error");
                             }
                           }}
                           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm active:scale-95 cursor-pointer"
@@ -1706,7 +1634,7 @@ export default function OrderPage() {
                   try {
                     await CrudService.update("products", {
                       ...product,
-                      stock: 0,
+                      status: "INACTIVE",
                     });
                     showToast(`Đã báo hết món "${product.name}" thành công!`);
                   } catch (err) {

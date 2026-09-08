@@ -29,6 +29,9 @@ export default defineConfig(({ mode }) => {
   return {
     base: "./",
     plugins: [react(), tailwindcss(), viteSingleFile()],
+    oxc: {
+      drop: ["console", "debugger"],
+    },
     server: {
       proxy,
     },

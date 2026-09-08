@@ -156,21 +156,21 @@ export default function OrderHistoryPage() {
 
   const handleConfirmDeleteOrder = async () => {
     if (!deleteTargetId || isDeleting) return;
+    const targetId = deleteTargetId;
+
+    // Đóng popup & thông báo thành công ngay lập tức (0ms response)
+    setIsDeleteModalOpen(false);
+    setDeleteTargetId(null);
+    setDeleteError("");
+    setToastMessage("Xóa thành công.");
+    setTimeout(() => setToastMessage(""), 3000);
+
+    // Gọi backend xóa ngầm (xóa orders, order_snapshots, payments)
     try {
-      setIsDeleting(true);
-      setDeleteError("");
-
-      await orderApi.deleteOrder(deleteTargetId);
-
-      setToastMessage("Xóa thành công.");
-      setIsDeleteModalOpen(false);
-      setDeleteTargetId(null);
-      setTimeout(() => setToastMessage(""), 3000);
+      await orderApi.deleteOrder(targetId);
     } catch (err) {
       console.error("Delete order error:", err);
-      setDeleteError(err.message || "Không thể xóa dữ liệu.");
-    } finally {
-      setIsDeleting(false);
+      appStore.setError(err.message || "Lỗi khi xóa đơn hàng trên máy chủ.");
     }
   };
 

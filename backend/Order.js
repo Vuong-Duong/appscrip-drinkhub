@@ -3,11 +3,8 @@
  * ========================= */
 
 const createOrder = (payload) => {
-  return withTransaction_("reduce_stock", () => {
+  return withTransaction_("create_order", () => {
     const orderId = generateId_("ord");
-
-    // === VALIDATE STOCK TRƯỚC KHI TẠO ORDER ===
-    validateStockBeforeOrder_(payload.items || []);
 
     const orderData = {
       id: orderId,
@@ -37,9 +34,6 @@ const createOrder = (payload) => {
       createdAt: orderData.createdAt,
       frozen: false,
     });
-
-    // === REDUCE STOCK SAU KHI ORDER CREATED ===
-    reduceProductStock_(payload.items || []);
 
     // === OCCUPY TABLE ===
     if (payload.tableId) {
@@ -149,7 +143,7 @@ const mapOrderDoc_ = (doc) => ({
  * - Giảm stock
  */
 const addItemsToOrder = (orderId, newItems, discount) => {
-  return withTransaction_("reduce_stock", () => {
+  return withTransaction_("add_items", () => {
     const orderDoc = firestoreGet_("orders", orderId);
     if (!orderDoc) {
       throw new Error("ORDER_NOT_FOUND");
@@ -164,9 +158,6 @@ const addItemsToOrder = (orderId, newItems, discount) => {
     if (paymentStatus === "PAID") {
       throw new Error("ORDER_ALREADY_PAID");
     }
-
-    // Validate stock
-    validateStockBeforeOrder_(newItems);
 
     const existingItems = Array.isArray(orderDoc.items) ? orderDoc.items : [];
     const updatedItems = [...existingItems, ...newItems];
@@ -207,9 +198,6 @@ const addItemsToOrder = (orderId, newItems, discount) => {
         });
       }
     }
-
-    // Reduce stock
-    reduceProductStock_(newItems);
 
     logAction_("ADD_ITEMS", orderId, "staff", {
       newItemCount: newItems.length,

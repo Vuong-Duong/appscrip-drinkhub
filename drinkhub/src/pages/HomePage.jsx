@@ -3,16 +3,25 @@ import Footer from "../components/Footer";
 import StoreInfo from "../components/StoreInfo";
 import StaffInfo from "../components/StaffInfo";
 import FeatureGridMain from "../components/FeatureGridMain";
+import AccessDeniedModal from "../components/AccessDeniedModal";
 import { useNavigate } from "react-router-dom";
 import { getStoredAuthUser } from "../utils/auth";
+import { useState } from "react";
 
 export default function HomePage() {
   const navigate = useNavigate();
   const user = getStoredAuthUser();
+  const [showDenied, setShowDenied] = useState(false);
+  const [deniedFeature, setDeniedFeature] = useState("");
 
-  const handleAdminNavigate = (route) => {
+  const showAccessDenied = (featureName) => {
+    setDeniedFeature(featureName);
+    setShowDenied(true);
+  };
+
+  const handleAdminNavigate = (route, featureName = "") => {
     if (user?.role !== "admin") {
-      alert("Chi tai khoan Admin moi co quyen truy cap tinh nang nay!");
+      showAccessDenied(featureName);
       return;
     }
     navigate(route);
@@ -61,7 +70,7 @@ export default function HomePage() {
               <div className="grid grid-cols-2 gap-2 sm:gap-4 flex-1">
                 {/* Sales Program */}
                 <button
-                  onClick={() => handleAdminNavigate("/admin/discount")}
+                  onClick={() => handleAdminNavigate("/admin/discount", "Chương trình bán hàng")}
                   className="bg-white border border-gray-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm hover:shadow-md active:scale-95 transition-all text-left flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-4"
                 >
                   <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-orange-100 flex items-center justify-center text-xl sm:text-2xl flex-shrink-0">
@@ -79,7 +88,7 @@ export default function HomePage() {
 
                 {/* Menu */}
                 <button
-                  onClick={() => handleAdminNavigate("/admin/menu")}
+                  onClick={() => handleAdminNavigate("/admin/menu", "Quản lý thực đơn")}
                   className="bg-white border border-gray-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm hover:shadow-md active:scale-95 transition-all text-left flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-4"
                 >
                   <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-emerald-100 flex items-center justify-center text-xl sm:text-2xl flex-shrink-0">
@@ -110,7 +119,7 @@ export default function HomePage() {
               <button
                 onClick={() => {
                   if (user?.role !== "admin") {
-                    alert("Chỉ tài khoản Admin mới có quyền truy cập Báo cáo!");
+                    showAccessDenied("Báo cáo & Thống kê");
                     return;
                   }
                   navigate("/dashboard");
@@ -142,6 +151,13 @@ export default function HomePage() {
       </main>
 
       <Footer />
+
+      {/* Access Denied Popup */}
+      <AccessDeniedModal
+        isOpen={showDenied}
+        onClose={() => setShowDenied(false)}
+        featureName={deniedFeature}
+      />
     </div>
   );
 }

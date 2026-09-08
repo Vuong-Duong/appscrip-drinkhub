@@ -116,9 +116,9 @@ const scanSerial = async () => {
         ...guessDeviceType({ productName: name }),
         meta: [
           info.usbVendorId &&
-            `VID: 0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, "0")}`,
+          `VID: 0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, "0")}`,
           info.usbProductId &&
-            `PID: 0x${info.usbProductId.toString(16).toUpperCase().padStart(4, "0")}`,
+          `PID: 0x${info.usbProductId.toString(16).toUpperCase().padStart(4, "0")}`,
         ].filter(Boolean),
       };
     });
@@ -184,10 +184,10 @@ export default function DeviceStatusPage() {
   const formatTime = (d) =>
     d
       ? d.toLocaleTimeString("vi-VN", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
       : "";
 
   return (
@@ -238,11 +238,10 @@ export default function DeviceStatusPage() {
             return (
               <div
                 key={api.key}
-                className={`rounded-2xl border p-4 flex items-start gap-3 ${
-                  supported
+                className={`rounded-2xl border p-4 flex items-start gap-3 ${supported
                     ? "bg-white border-gray-100"
                     : "bg-gray-50 border-dashed border-gray-200"
-                }`}
+                  }`}
               >
                 <span className="text-2xl">{api.icon}</span>
                 <div className="flex-1 min-w-0">
@@ -251,11 +250,10 @@ export default function DeviceStatusPage() {
                       {api.label}
                     </span>
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                        supported
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${supported
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                           : "bg-red-50 text-red-600 border-red-200"
-                      }`}
+                        }`}
                     >
                       {supported ? "Hỗ trợ" : "Không hỗ trợ"}
                     </span>

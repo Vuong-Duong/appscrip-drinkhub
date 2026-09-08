@@ -19,13 +19,11 @@ class BootstrapService {
   static async init() {
     // Prevent multiple initializations
     if (_initialized) {
-      console.log("[Bootstrap] Already initialized, skipping");
       return;
     }
     _initialized = true;
 
     try {
-      console.log("[Bootstrap] Starting initialization...");
       StorageService.init();
 
       const meta = StorageService.getMeta();
@@ -33,11 +31,9 @@ class BootstrapService {
 
       if (!hasCache) {
         // FIRST INSTALL: Fetch all data
-        console.log("[Bootstrap] First install - fetching data...");
         await this._firstInstall();
       } else {
         // RETURNING USER: Load from cache immediately
-        console.log("[Bootstrap] Returning user - loading from cache");
         this._loadFromCache();
 
         // Check if loaded cache is empty (e.g. due to previous mapping bugs/empty sheet)
@@ -45,21 +41,16 @@ class BootstrapService {
         const isEmpty = (state.products || []).length === 0 || (state.tables || []).length === 0;
 
         if (isEmpty) {
-          console.log("[Bootstrap] Cache is empty, forcing fetch from sheet...");
           await this._firstInstall();
         } else {
           // Ensure loading is false so UI renders right away
           AppStore.setLoading(false);
 
           // Always schedule a background refresh on startup to sync latest sheet data
-          console.log("[Bootstrap] Scheduling startup background refresh");
           this._backgroundRefresh();
         }
       }
-
-      console.log("[Bootstrap] Initialization complete");
     } catch (e) {
-      console.error("[Bootstrap] Init error:", e);
       AppStore.setError("Initialization failed: " + e.message);
       throw e;
     }
@@ -78,10 +69,7 @@ class BootstrapService {
 
       // Load into AppStore (which also saves to StorageService)
       AppStore.loadAll(allData);
-
-      console.log("[Bootstrap] First install complete, data cached");
     } catch (e) {
-      console.error("[Bootstrap] First install failed:", e);
       throw e;
     }
   }
@@ -91,19 +79,8 @@ class BootstrapService {
    */
   static _loadFromCache() {
     try {
-      const cacheAge = StorageService.getAge();
-      console.log(`[Bootstrap] Loading from cache (age: ${cacheAge}min)`);
-
       // AppStore already loaded from storage in its constructor (_initFromStorage)
-      // Just confirm it's ready
-      const state = AppStore.getState();
-      console.log("[Bootstrap] Cache loaded into AppStore", {
-        products: (state.products || []).length,
-        tables: (state.tables || []).length,
-        orders: (state.orders || []).length,
-      });
     } catch (e) {
-      console.error("[Bootstrap] Load from cache error:", e);
       throw e;
     }
   }
@@ -116,12 +93,10 @@ class BootstrapService {
   static _backgroundRefresh() {
     setTimeout(async () => {
       try {
-        console.log("[Bootstrap] Background refresh starting...");
         const freshData = await request("GET_ALL_DATA_FOR_CACHE");
 
         if (freshData) {
           this._safeRefresh(freshData);
-          console.log("[Bootstrap] Background refresh complete (safe)");
         }
       } catch (e) {
         console.error("[Bootstrap] Background refresh error:", e);

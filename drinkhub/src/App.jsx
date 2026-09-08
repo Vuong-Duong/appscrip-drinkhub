@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import AccessDeniedModal from "./components/AccessDeniedModal";
 import {
   HashRouter,
   Navigate,
@@ -116,11 +117,22 @@ function ProtectedRoute() {
 
 function AdminRoute() {
   const user = getStoredAuthUser();
-  if (user?.role !== "admin") {
-    return <Navigate to="/" replace />;
-  }
+  const [showDenied, setShowDenied] = useState(user?.role !== "admin");
 
-  return <Outlet />;
+  if (user?.role === "admin") return <Outlet />;
+
+  const handleClose = () => {
+    setShowDenied(false);
+    // Navigate to home after closing — use window.history to avoid extra hook
+    window.location.hash = "/";
+  };
+
+  return (
+    <AccessDeniedModal
+      isOpen={showDenied}
+      onClose={handleClose}
+    />
+  );
 }
 
 function App() {

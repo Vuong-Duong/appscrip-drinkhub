@@ -236,7 +236,7 @@ export default function ShiftReconciliationPage() {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Header />
 
-      <main className="flex-1 overflow-y-auto pt-[60px] sm:pt-20 px-3 sm:px-6 max-w-7xl mx-auto pb-12 w-full">
+      <main className="flex-1 overflow-y-auto pt-[60px] sm:pt-20 px-3 sm:px-6 max-w-7xl mx-auto pb-[200px] sm:pb-[220px] w-full">
         {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <button

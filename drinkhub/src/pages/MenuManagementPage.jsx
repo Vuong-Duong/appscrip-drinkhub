@@ -14,7 +14,6 @@ const emptyForm = {
   category: "",
   price: "",
   cost: "",
-  stock: "",
   status: "ACTIVE",
   image: "",
 };
@@ -95,10 +94,6 @@ export default function MenuManagementPage() {
           : "",
       cost:
         product.cost !== undefined && product.cost !== null ? product.cost : "",
-      stock:
-        product.stock !== undefined && product.stock !== null
-          ? product.stock
-          : "",
       status: product.status || "ACTIVE",
       image: product.image || "",
     });
@@ -116,9 +111,6 @@ export default function MenuManagementPage() {
     ).trim();
     const costStr = String(
       form.cost !== undefined && form.cost !== null ? form.cost : "",
-    ).trim();
-    const stockStr = String(
-      form.stock !== undefined && form.stock !== null ? form.stock : "",
     ).trim();
 
     // Validations
@@ -138,17 +130,12 @@ export default function MenuManagementPage() {
       setError("Vui lòng nhập giá vốn hợp lệ (số không âm)");
       return;
     }
-    if (stockStr === "" || isNaN(Number(stockStr)) || Number(stockStr) < 0) {
-      setError("Vui lòng nhập số lượng tồn kho hợp lệ (số không âm)");
-      return;
-    }
 
     const payload = {
       name: trimmedName,
       category: trimmedCategory,
       price: parseInt(priceStr, 10) || 0,
       cost: parseInt(costStr, 10) || 0,
-      stock: parseInt(stockStr, 10) || 0,
       status: form.status,
       image: (form.image || "").trim(),
     };
@@ -299,12 +286,6 @@ export default function MenuManagementPage() {
                         {formatCurrency(product.cost)}
                       </p>
                     </div>
-                    <div className="col-span-2">
-                      <p className="text-gray-400">Tồn kho</p>
-                      <p className="font-semibold text-xs sm:text-sm">
-                        {product.stock}
-                      </p>
-                    </div>
                   </div>
                   <div className="flex gap-1 sm:gap-2 mt-2">
                     <button
@@ -398,18 +379,7 @@ export default function MenuManagementPage() {
                   onChange={(e) => setForm({ ...form, cost: e.target.value })}
                 />
               </label>
-              <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">
-                  Số lượng tồn kho
-                </span>
-                <input
-                  type="number"
-                  className="w-full border rounded-xl px-4 py-3"
-                  placeholder="Nhập số lượng"
-                  value={form.stock}
-                  onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                />
-              </label>
+
               <label className="space-y-1">
                 <span className="text-sm font-medium text-gray-600">
                   Trạng thái

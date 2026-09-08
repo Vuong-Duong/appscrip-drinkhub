@@ -116,13 +116,8 @@ class UploadService {
         throw new Error("File too large. Max 5MB.");
       }
 
-      console.log(`[UploadService] Starting upload: ${file.name}`);
-
       // Compress image
       const compressedBlob = await this.compressImage(file, options);
-      console.log(
-        `[UploadService] Compressed: ${file.size} → ${compressedBlob.size} bytes`,
-      );
 
       // Convert to base64
       const base64 = await this.blobToBase64(compressedBlob);
@@ -136,15 +131,12 @@ class UploadService {
       // Call backend upload
       const result = await uploadApi.uploadImageToGrive(base64, file.name);
 
-      console.log("[UploadService] Upload success:", result);
-
       return {
         success: true,
         url: result.url,
         fileId: result.fileId,
       };
     } catch (error) {
-      console.error("[UploadService] Upload failed:", error.message || error);
       return {
         success: false,
         error: error.details ? `${error.message}: ${error.details}` : (error.message || String(error)),
