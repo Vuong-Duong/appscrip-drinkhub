@@ -1,6 +1,83 @@
 /**
- * Utility for printing cup decal stickers (Tem nhiệt dán ly 50x30mm)
+ * Utility for printing cup decal stickers via RawBT
  */
+
+// Tải html2canvas một lần duy nhất qua CDN
+function ensureHtml2Canvas() {
+  if (window.html2canvas) return Promise.resolve(window.html2canvas);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = () => resolve(window.html2canvas);
+    script.onerror = () => reject(new Error('Không tải được html2canvas. Kiểm tra kết nối mạng.'));
+    document.head.appendChild(script);
+  });
+}
+
+// Gọi hàm này 1 lần khi app khởi động để tải sẵn thư viện html2canvas
+export function preloadPrintDependencies() {
+  ensureHtml2Canvas().catch(() => {});
+}
+
+// Render HTML trong iframe ẩn, chụp thành ảnh PNG base64
+async function renderReceiptToPngBase64(htmlContent) {
+  const html2canvas = await ensureHtml2Canvas();
+
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '-9999px';
+  iframe.style.width = '302px'; // 80mm ~ 302px at 96dpi
+  iframe.style.height = '1px';
+  iframe.style.border = 'none';
+  iframe.style.visibility = 'hidden';
+  document.body.appendChild(iframe);
+
+  try {
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
+
+    // Chờ render xong (giảm xuống 150ms để tránh mất user gesture)
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    
+    // Tự động điều chỉnh chiều cao
+    const scrollHeight = iframe.contentWindow.document.body.scrollHeight;
+    iframe.style.height = scrollHeight + 'px';
+
+    const canvas = await html2canvas(iframe.contentWindow.document.body, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      width: 302,
+      windowWidth: 302,
+    });
+
+    return canvas.toDataURL('image/png');
+  } finally {
+    try {
+      if (iframe && iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    } catch (_) {}
+  }
+}
+
+// Gửi ảnh PNG base64 đến app RawBT
+function sendBase64ImageToRawBT(base64DataUrl) {
+  const uri = 'rawbt:' + base64DataUrl;
+  const link = document.createElement('a');
+  link.href = uri;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    try {
+      if (link && link.parentNode) link.parentNode.removeChild(link);
+    } catch (_) {}
+  }, 3000);
+}
 
 function generateSimpleBarcodeHTML(codeStr) {
   const cleanCode = String(codeStr || "").toUpperCase().replace(/[^A-Z0-9-]/g, "");
@@ -58,7 +135,7 @@ function generateSimpleBarcodeHTML(codeStr) {
   `;
 }
 
-export function printCupStickers(orderData, tableData, storeInfo) {
+export const printCupStickers = async (orderData, tableData, storeInfo) => {
   const storeName = storeInfo?.name || "LongKa";
   const tableName = tableData?.number || orderData?.tableName || orderData?.tableId || "Mang đi";
   const orderId = String(orderData?.id || orderData?.existingOrderId || `ORD${Date.now().toString().slice(-6)}`);
@@ -104,9 +181,9 @@ export function printCupStickers(orderData, tableData, storeInfo) {
 
       return `
         <div class="decal-sticker" style="
-          width: 50mm;
-          height: 35mm;
-          padding: 2mm 3mm;
+          width: 80mm;
+          min-height: 50mm;
+          padding: 4mm 6mm;
           box-sizing: border-box;
           background: #fff;
           color: #000;
@@ -115,42 +192,42 @@ export function printCupStickers(orderData, tableData, storeInfo) {
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          border: 1px dashed #ccc;
-          margin-bottom: 5px;
+          border-bottom: 1px dashed #ccc;
+          margin-bottom: 0px;
         ">
           <!-- Top Header -->
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #000; padding-bottom: 2px;">
-            <span style="font-size: 10px; font-weight: bold; text-transform: uppercase;">${storeName}</span>
-            <span style="font-size: 10px; font-weight: bold; background: #000; color: #fff; padding: 1px 4px; border-radius: 2px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 4px;">
+            <span style="font-size: 14px; font-weight: bold; text-transform: uppercase;">${storeName}</span>
+            <span style="font-size: 14px; font-weight: bold; background: #000; color: #fff; padding: 2px 6px; border-radius: 4px;">
               ${tableName} • Ly: ${cupIndex}/${totalCups}
             </span>
           </div>
 
           <!-- Item Main Title -->
-          <div style="margin-top: 3px;">
-            <div style="font-size: 13px; font-weight: 900; line-height: 1.2; text-transform: uppercase;">
+          <div style="margin-top: 6px; flex-grow: 1;">
+            <div style="font-size: 18px; font-weight: 900; line-height: 1.2; text-transform: uppercase;">
               ${cup.name} ${cup.size ? `(${cup.size})` : ""}
             </div>
 
             <!-- Toppings -->
             ${toppingText ? `
-              <div style="font-size: 9px; font-weight: bold; margin-top: 2px; color: #222;">
+              <div style="font-size: 12px; font-weight: bold; margin-top: 4px; color: #222;">
                 🧋 ${toppingText}
               </div>
             ` : ""}
 
             <!-- Notes -->
             ${notesText ? `
-              <div style="font-size: 9px; font-style: italic; margin-top: 1px; color: #333;">
+              <div style="font-size: 12px; font-style: italic; margin-top: 2px; color: #333;">
                 📝 ${notesText}
               </div>
             ` : ""}
           </div>
 
           <!-- Bottom Barcode & Timestamp -->
-          <div style="margin-top: auto; border-top: 0.5px solid #ddd; padding-top: 1px; text-align: center;">
+          <div style="margin-top: 8px; border-top: 1px solid #ddd; padding-top: 4px; text-align: center;">
             ${generateSimpleBarcodeHTML(cupBarcode)}
-            <div style="display: flex; justify-content: space-between; font-size: 7px; font-weight: bold; color: #555; margin-top: 1px;">
+            <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; color: #555; margin-top: 2px;">
               <span>Đơn: #${orderId.slice(-6)}</span>
               <span>${formattedTime} ${formattedDate}</span>
             </div>
@@ -160,64 +237,35 @@ export function printCupStickers(orderData, tableData, storeInfo) {
     })
     .join("");
 
-  const printWindow = window.open("", "_blank", "width=450,height=600");
-  if (!printWindow) {
-    alert("Vui lòng cho phép mở popup trình duyệt để in tem dán ly!");
-    return;
-  }
-
-  printWindow.document.write(`
+  const fullHTML = `
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8">
       <title>In Tem Dán Ly - ${storeName}</title>
       <style>
-        @page {
-          size: 50mm 35mm;
-          margin: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
           margin: 0;
           padding: 0;
-          background: #eee;
+          background: #fff;
+          width: 80mm;
           display: flex;
           flex-direction: column;
-          align-items: center;
-        }
-        @media print {
-          body {
-            background: #fff;
-          }
-          .no-print {
-            display: none !important;
-          }
-          .decal-sticker {
-            border: none !important;
-            margin: 0 !important;
-            box-shadow: none !important;
-          }
-        }
-        .decal-sticker {
-          box-shadow: 0 2px 5px rgba(0,0,0,0.15);
         }
       </style>
     </head>
     <body>
-      <div class="no-print" style="padding: 10px; background: #333; color: #fff; width: 100%; text-align: center; box-sizing: border-box;">
-        <button onclick="window.print()" style="padding: 8px 16px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
-          🖨️ In ${totalCups} Tem Dán Ly
-        </button>
-        <button onclick="window.close()" style="padding: 8px 16px; background: #4b5563; color: #fff; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-left: 8px;">
-          Đóng
-        </button>
-      </div>
-
-      <div style="padding: 10px;">
-        ${stickersHTML}
-      </div>
+      ${stickersHTML}
     </body>
     </html>
-  `);
-  printWindow.document.close();
+  `;
+
+  try {
+    const base64 = await renderReceiptToPngBase64(fullHTML);
+    sendBase64ImageToRawBT(base64);
+  } catch (err) {
+    console.error('Lỗi khi in tem qua RawBT:', err);
+    alert('Lỗi in tem: ' + (err.message || 'Không xác định. Kiểm tra đã cài RawBT chưa.'));
+  }
 }

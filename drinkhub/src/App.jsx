@@ -32,6 +32,7 @@ import {
 } from "./utils/auth";
 import BootstrapService from "./services/BootstrapService";
 import appStore from "./services/AppStore";
+import { preloadPrintDependencies } from "./utils/receipt";
 
 function ProtectedRoute() {
   const [status, setStatus] = useState(() =>
@@ -136,6 +137,10 @@ function AdminRoute() {
 }
 
 function App() {
+  useEffect(() => {
+    preloadPrintDependencies();
+  }, []);
+
   return (
     <HashRouter>
       <Routes>

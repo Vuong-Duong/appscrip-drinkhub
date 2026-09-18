@@ -22,55 +22,95 @@ const formatTimeVN = (dateVal) => {
   return `${hour}:${minute}`;
 };
 
-// Main print receipt handler — in thẳng máy in nhiệt bằng hidden iframe, không nhảy tab mới (about:blank)
-export const printReceipt = (order, table, restaurant, type = "payment_receipt") => {
-  const receiptContent = generateReceiptHTML(order, table, restaurant, type);
+// Tải html2canvas một lần duy nhất qua CDN
+function ensureHtml2Canvas() {
+  if (window.html2canvas) return Promise.resolve(window.html2canvas);
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    script.onload = () => resolve(window.html2canvas);
+    script.onerror = () => reject(new Error('Không tải được html2canvas. Kiểm tra kết nối mạng.'));
+    document.head.appendChild(script);
+  });
+}
 
-  // Xóa iframe in cũ nếu có
-  const oldFrame = document.getElementById("receipt-print-iframe");
-  if (oldFrame) {
-    try { oldFrame.remove(); } catch (_) {}
-  }
+// Gọi hàm này 1 lần khi app khởi động để tải sẵn thư viện html2canvas
+export function preloadPrintDependencies() {
+  ensureHtml2Canvas().catch(() => {});
+}
 
-  // Tạo iframe ẩn trực tiếp trên trang để không bị bật tab mới trên Android Chrome
-  const iframe = document.createElement("iframe");
-  iframe.id = "receipt-print-iframe";
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0px";
-  iframe.style.height = "0px";
-  iframe.style.border = "none";
-  iframe.style.visibility = "hidden";
-  iframe.style.zIndex = "-9999";
+// Render HTML hóa đơn trong iframe ẩn, chụp thành ảnh PNG base64
+async function renderReceiptToPngBase64(htmlContent) {
+  const html2canvas = await ensureHtml2Canvas();
+
+  // Tạo iframe ẩn để render HTML
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '-9999px';
+  iframe.style.width = '302px'; // 80mm ~ 302px at 96dpi
+  iframe.style.height = '1px';
+  iframe.style.border = 'none';
+  iframe.style.visibility = 'hidden';
   document.body.appendChild(iframe);
 
   try {
     const doc = iframe.contentWindow.document;
     doc.open();
-    doc.write(receiptContent);
+    doc.write(htmlContent);
     doc.close();
 
-    // Chờ nội dung render xong rồi gọi print
-    setTimeout(() => {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } catch (err) {
-        console.error("Lỗi khi gọi print qua iframe:", err);
-      } finally {
-        // Tự động dọn dẹp iframe sau 10 giây
-        setTimeout(() => {
-          try {
-            if (iframe && iframe.parentNode) {
-              iframe.parentNode.removeChild(iframe);
-            }
-          } catch (_) {}
-        }, 10000);
+    // Chờ render xong (giảm xuống 150ms để tránh mất user gesture)
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    // Tự động điều chỉnh chiều cao
+    const scrollHeight = iframe.contentWindow.document.body.scrollHeight;
+    iframe.style.height = scrollHeight + 'px';
+
+    const canvas = await html2canvas(iframe.contentWindow.document.body, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      width: 302,
+      windowWidth: 302,
+    });
+
+    return canvas.toDataURL('image/png');
+  } finally {
+    // Dọn dẹp iframe sau khi chụp xong
+    try {
+      if (iframe && iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
       }
-    }, 300);
-  } catch (e) {
-    console.error("Lỗi khởi tạo tài liệu in:", e);
+    } catch (_) {}
+  }
+}
+
+// Gửi ảnh PNG base64 đến app RawBT qua URI scheme
+function sendBase64ImageToRawBT(base64DataUrl) {
+  // base64DataUrl có dạng: data:image/png;base64,xxxx
+  const uri = 'rawbt:' + base64DataUrl;
+  const link = document.createElement('a');
+  link.href = uri;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => {
+    try {
+      if (link && link.parentNode) link.parentNode.removeChild(link);
+    } catch (_) {}
+  }, 3000);
+}
+
+// Main print receipt handler — in qua RawBT (không dùng hộp thoại in hệ thống)
+export const printReceipt = async (order, table, restaurant, type = "payment_receipt") => {
+  try {
+    const receiptContent = generateReceiptHTML(order, table, restaurant, type);
+    const base64 = await renderReceiptToPngBase64(receiptContent);
+    sendBase64ImageToRawBT(base64);
+  } catch (err) {
+    console.error('Lỗi khi in hóa đơn qua RawBT:', err);
+    alert('Lỗi in: ' + (err.message || 'Không xác định. Kiểm tra đã cài RawBT và cấu hình máy in chưa.'));
   }
 };
 
@@ -245,7 +285,7 @@ function generateSingleReceiptBodyHTML(order, table, restaurant, singleType) {
   }
 }
 
-// Generates complete HTML document for 58mm thermal printer
+// Generates complete HTML document for 80mm thermal printer
 function generateReceiptHTML(order, table, restaurant, type) {
   let types = [];
   if (Array.isArray(type)) {
@@ -260,7 +300,7 @@ function generateReceiptHTML(order, table, restaurant, type) {
     generateSingleReceiptBodyHTML(order, table, restaurant, t)
   );
 
-  // Dùng page-break-after thay vì page-break-before để phân trang đúng
+  // Dùng page-break-after để phân trang giữa phiếu
   const bodyHTML = bodies.join(
     '<div style="page-break-after:always;"></div>'
   );
@@ -271,7 +311,7 @@ function generateReceiptHTML(order, table, restaurant, type) {
   <meta charset="UTF-8">
   <title>In phieu</title>
   <style>
-    /* ===== 58mm Thermal Printer Styles ===== */
+    /* ===== 80mm Thermal Printer Styles ===== */
     * {
       box-sizing: border-box;
       margin: 0;
@@ -284,7 +324,7 @@ function generateReceiptHTML(order, table, restaurant, type) {
       line-height: 1.35;
       color: #000;
       background: #fff;
-      width: 58mm;
+      width: 80mm;
     }
 
     .receipt-title {
@@ -305,19 +345,6 @@ function generateReceiptHTML(order, table, restaurant, type) {
     table {
       width: 100%;
       border-collapse: collapse;
-    }
-
-    @media print {
-      html, body {
-        width: 58mm;
-        margin: 0;
-        padding: 0;
-        background: #fff;
-      }
-      @page {
-        size: 58mm auto;
-        margin: 2mm 1mm;
-      }
     }
   </style>
 </head>

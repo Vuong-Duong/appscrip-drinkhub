@@ -118,22 +118,43 @@ class BootstrapService {
       }
     });
 
-    // Update tables from server BUT preserve local occupied status
-    if (freshData.tables) {
+    // Đồng bộ đơn hàng từ server, giữ lại các đơn nháp cục bộ chưa gửi (ord_local_)
+    if (freshData.orders && Array.isArray(freshData.orders)) {
+      const currentOrders = AppStore.get("orders") || [];
+      const pendingLocalOrders = currentOrders.filter((o) =>
+        String(o.id || "").startsWith("ord_local_"),
+      );
+      const serverOrderIds = new Set(freshData.orders.map((o) => o.id));
+      const filteredPending = pendingLocalOrders.filter(
+        (o) => !serverOrderIds.has(o.id),
+      );
+      AppStore.set("orders", [...filteredPending, ...freshData.orders], true);
+    }
+
+    // Cập nhật danh sách bàn từ server (Firestore là nguồn chuẩn duy nhất)
+    // Chỉ bảo lưu trạng thái bận nếu máy đang có đơn nháp cục bộ chưa sync (ord_local_)
+    if (freshData.tables && Array.isArray(freshData.tables)) {
       const currentTables = AppStore.get("tables") || [];
-      const localOccupiedMap = new Map();
+      const localTempMap = new Map();
       currentTables.forEach((t) => {
-        if (t.status === "occupied" && t.currentOrderId) {
-          localOccupiedMap.set(String(t.id), t.currentOrderId);
+        if (
+          t.status === "occupied" &&
+          t.currentOrderId &&
+          String(t.currentOrderId).startsWith("ord_local_")
+        ) {
+          localTempMap.set(String(t.id), t.currentOrderId);
         }
       });
 
       const mergedTables = freshData.tables.map((t) => {
-        const localOrderId = localOccupiedMap.get(String(t.id));
-        if (localOrderId) {
-          return { ...t, status: "occupied", currentOrderId: localOrderId };
+        const tempOrderId = localTempMap.get(String(t.id));
+        if (tempOrderId) {
+          return { ...t, status: "occupied", currentOrderId: tempOrderId };
         }
-        return t;
+        return {
+          ...t,
+          status: String(t.status || "").trim().toLowerCase(),
+        };
       });
 
       AppStore.set("tables", mergedTables, true);

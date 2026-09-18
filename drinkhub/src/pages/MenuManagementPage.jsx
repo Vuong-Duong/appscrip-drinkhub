@@ -126,16 +126,12 @@ export default function MenuManagementPage() {
       setError("Vui lòng nhập giá bán hợp lệ (số không âm)");
       return;
     }
-    if (costStr === "" || isNaN(Number(costStr)) || Number(costStr) < 0) {
-      setError("Vui lòng nhập giá vốn hợp lệ (số không âm)");
-      return;
-    }
 
     const payload = {
       name: trimmedName,
       category: trimmedCategory,
       price: parseInt(priceStr, 10) || 0,
-      cost: parseInt(costStr, 10) || 0,
+      cost: 0,
       status: form.status,
       image: (form.image || "").trim(),
     };
@@ -273,19 +269,11 @@ export default function MenuManagementPage() {
                       {product.status}
                     </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                    <div>
-                      <p className="text-gray-400">Giá</p>
-                      <p className="font-semibold text-xs sm:text-sm">
-                        {formatCurrency(product.price)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400">Vốn</p>
-                      <p className="font-semibold text-xs sm:text-sm">
-                        {formatCurrency(product.cost)}
-                      </p>
-                    </div>
+                  <div className="text-xs mt-2">
+                    <p className="text-gray-400">Giá bán</p>
+                    <p className="font-bold text-blue-600 text-sm sm:text-base">
+                      {formatCurrency(product.price)}
+                    </p>
                   </div>
                   <div className="flex gap-1 sm:gap-2 mt-2">
                     <button
@@ -365,18 +353,6 @@ export default function MenuManagementPage() {
                   placeholder="Nhập giá bán"
                   value={form.price}
                   onChange={(e) => setForm({ ...form, price: e.target.value })}
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-sm font-medium text-gray-600">
-                  Giá vốn
-                </span>
-                <input
-                  type="number"
-                  className="w-full border rounded-xl px-4 py-3"
-                  placeholder="Nhập giá vốn"
-                  value={form.cost}
-                  onChange={(e) => setForm({ ...form, cost: e.target.value })}
                 />
               </label>
 

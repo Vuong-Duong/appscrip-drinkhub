@@ -47,7 +47,15 @@ export default function TablePage() {
     // If we have cached data, don't show loading
     setIsLoading(initialTables.length === 0 && appStore.getState().loading);
 
-    return unsubscribe;
+    // Tự động tải dữ liệu bàn mới nhất từ Firebase khi mở trang và khi quay lại tab
+    handleRefresh();
+    const onFocus = () => handleRefresh();
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   const handleRefresh = async () => {

@@ -2,7 +2,7 @@
  * Product.gs - Firestore
  * ========================= */
 
-function getProducts(activeOnly = true) {
+function getProducts(activeOnly = false) {
   var docs = firestoreQuery_("products");
   if (!Array.isArray(docs) || docs.length === 0) {
     return [];
@@ -11,9 +11,10 @@ function getProducts(activeOnly = true) {
   return docs
     .filter(function (doc) {
       if (!doc.id) return false;
-      if (!activeOnly) return true;
       var status = trimSafe_(doc.status);
-      return status !== "INACTIVE" && status !== "DELETED";
+      if (status === "DELETED") return false;
+      if (activeOnly && status === "INACTIVE") return false;
+      return true;
     })
     .map(mapProductDoc_)
     .sort(function (a, b) {

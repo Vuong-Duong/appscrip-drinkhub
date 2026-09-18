@@ -4,7 +4,15 @@
 
 const createOrder = (payload) => {
   return withTransaction_("create_order", () => {
-    const orderId = generateId_("ord");
+    const requestedOrderId = trimSafe_(payload.id);
+    if (requestedOrderId) {
+      const existingOrder = firestoreGet_("orders", requestedOrderId);
+      if (existingOrder) {
+        return existingOrder;
+      }
+    }
+
+    const orderId = requestedOrderId || generateId_("ord");
 
     const orderData = {
       id: orderId,
@@ -165,7 +173,9 @@ const addItemsToOrder = (orderId, newItems, discount) => {
     // Recalculate totals from ALL items
     let newSubtotal = 0;
     updatedItems.forEach((item) => {
-      newSubtotal += toNumberSafe_(item.subtotal || item.unitPrice * item.quantity);
+      newSubtotal += toNumberSafe_(
+        item.subtotal || item.unitPrice * item.quantity,
+      );
     });
 
     const safeDiscount =
@@ -250,9 +260,16 @@ const getOrders = (filters = {}) => {
   const paymentStatus = trimSafe_(filters.paymentStatus);
 
   const firestoreFilters = [];
-  if (tableId) firestoreFilters.push({ field: "tableId", op: "EQUAL", value: tableId });
-  if (status) firestoreFilters.push({ field: "status", op: "EQUAL", value: status });
-  if (paymentStatus) firestoreFilters.push({ field: "paymentStatus", op: "EQUAL", value: paymentStatus });
+  if (tableId)
+    firestoreFilters.push({ field: "tableId", op: "EQUAL", value: tableId });
+  if (status)
+    firestoreFilters.push({ field: "status", op: "EQUAL", value: status });
+  if (paymentStatus)
+    firestoreFilters.push({
+      field: "paymentStatus",
+      op: "EQUAL",
+      value: paymentStatus,
+    });
 
   const docs = firestoreQuery_("orders", {
     filters: firestoreFilters,
@@ -276,7 +293,9 @@ const getOrders = (filters = {}) => {
  */
 const deleteOrder = (orderId, userRole) => {
   if (!userRole || userRole.toLowerCase() !== "admin") {
-    throw new Error("PERMISSION_DENIED: Chỉ Chủ quán / Admin mới có quyền xóa đơn hàng");
+    throw new Error(
+      "PERMISSION_DENIED: Chỉ Chủ quán / Admin mới có quyền xóa đơn hàng",
+    );
   }
 
   if (!orderId) throw new Error("ORDER_ID_REQUIRED");
@@ -320,4 +339,3 @@ const deleteOrder = (orderId, userRole) => {
 
   return { success: true, deletedId: orderId };
 };
-

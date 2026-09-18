@@ -82,11 +82,34 @@ const scanUsb = async () => {
   }
 };
 
+const requestUsbDevice = async () => {
+  if (!hasApi("usb") || !navigator.usb.requestDevice) return null;
+  try {
+    const device = await navigator.usb.requestDevice({ filters: [] });
+    return {
+      id: `usb-${device.vendorId}-${device.productId}`,
+      name:
+        device.productName ||
+        `USB Device (${device.vendorId}:${device.productId})`,
+      type: "USB",
+      ...guessDeviceType(device),
+      meta: [
+        device.manufacturerName && `Hãng: ${device.manufacturerName}`,
+        device.serialNumber && `S/N: ${device.serialNumber}`,
+        `VID: 0x${device.vendorId.toString(16).toUpperCase().padStart(4, "0")}`,
+        `PID: 0x${device.productId.toString(16).toUpperCase().padStart(4, "0")}`,
+      ].filter(Boolean),
+    };
+  } catch {
+    return null;
+  }
+};
+
 const scanBluetooth = async () => {
   if (!hasApi("bluetooth")) return [];
   try {
     // getDevices() is available in Chrome 85+ with permission
-    const devices = await navigator.bluetooth.getDevices?.() ?? [];
+    const devices = (await navigator.bluetooth.getDevices?.()) ?? [];
     return devices.map((d) => ({
       id: `bt-${d.id}`,
       name: d.name || "Thiết bị Bluetooth không tên",
@@ -105,10 +128,9 @@ const scanSerial = async () => {
     const ports = await navigator.serial.getPorts();
     return ports.map((p, i) => {
       const info = p.getInfo?.() || {};
-      const name =
-        info.usbVendorId
-          ? `Serial Port (VID: 0x${info.usbVendorId.toString(16).toUpperCase()})`
-          : `Serial Port ${i + 1}`;
+      const name = info.usbVendorId
+        ? `Serial Port (VID: 0x${info.usbVendorId.toString(16).toUpperCase()})`
+        : `Serial Port ${i + 1}`;
       return {
         id: `serial-${i}`,
         name,
@@ -116,9 +138,9 @@ const scanSerial = async () => {
         ...guessDeviceType({ productName: name }),
         meta: [
           info.usbVendorId &&
-          `VID: 0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, "0")}`,
+            `VID: 0x${info.usbVendorId.toString(16).toUpperCase().padStart(4, "0")}`,
           info.usbProductId &&
-          `PID: 0x${info.usbProductId.toString(16).toUpperCase().padStart(4, "0")}`,
+            `PID: 0x${info.usbProductId.toString(16).toUpperCase().padStart(4, "0")}`,
         ].filter(Boolean),
       };
     });
@@ -158,6 +180,7 @@ export default function DeviceStatusPage() {
   const [scanning, setScanning] = useState(false);
   const [scannedAt, setScannedAt] = useState(null);
   const [apiSupport, setApiSupport] = useState({});
+  const [permissionMessage, setPermissionMessage] = useState("");
 
   // Check API support on mount
   useEffect(() => {
@@ -181,13 +204,30 @@ export default function DeviceStatusPage() {
     setScanning(false);
   };
 
+  const handleConnectUsb = async () => {
+    setPermissionMessage("");
+    const device = await requestUsbDevice();
+    if (!device) {
+      setPermissionMessage(
+        "Chưa cấp quyền USB hoặc thiết bị không hỗ trợ WebUSB trên trình duyệt Android này.",
+      );
+      return;
+    }
+    setDevices((current) => [
+      ...current.filter((item) => item.id !== device.id),
+      device,
+    ]);
+    setScannedAt(new Date());
+    setPermissionMessage("Đã cấp quyền phát hiện máy in USB.");
+  };
+
   const formatTime = (d) =>
     d
       ? d.toLocaleTimeString("vi-VN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      })
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
       : "";
 
   return (
@@ -238,10 +278,11 @@ export default function DeviceStatusPage() {
             return (
               <div
                 key={api.key}
-                className={`rounded-2xl border p-4 flex items-start gap-3 ${supported
+                className={`rounded-2xl border p-4 flex items-start gap-3 ${
+                  supported
                     ? "bg-white border-gray-100"
                     : "bg-gray-50 border-dashed border-gray-200"
-                  }`}
+                }`}
               >
                 <span className="text-2xl">{api.icon}</span>
                 <div className="flex-1 min-w-0">
@@ -250,10 +291,11 @@ export default function DeviceStatusPage() {
                       {api.label}
                     </span>
                     <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${supported
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        supported
                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                           : "bg-red-50 text-red-600 border-red-200"
-                        }`}
+                      }`}
                     >
                       {supported ? "Hỗ trợ" : "Không hỗ trợ"}
                     </span>
@@ -265,6 +307,28 @@ export default function DeviceStatusPage() {
               </div>
             );
           })}
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-6 text-sm text-blue-800">
+          <p className="font-bold mb-2">
+            Sơ đồ kết nối đúng của máy POS Android
+          </p>
+          <p>POS Android → USB → máy in nhiệt → RJ11/DRAWER → két tiền.</p>
+          <p className="mt-1 text-blue-700">
+            Két tiền không phải thiết bị USB riêng nên sẽ không xuất hiện trong
+            danh sách. Két chỉ mở khi máy in nhận lệnh in có xung mở két.
+          </p>
+          {apiSupport.usb && (
+            <button
+              onClick={handleConnectUsb}
+              className="mt-3 px-3 py-2 bg-blue-600 text-white rounded-xl font-semibold text-xs"
+            >
+              Cấp quyền máy in USB
+            </button>
+          )}
+          {permissionMessage && (
+            <p className="mt-2 text-xs font-semibold">{permissionMessage}</p>
+          )}
         </div>
 
         {/* Device list */}
@@ -351,8 +415,10 @@ export default function DeviceStatusPage() {
         <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-700">
           <strong>Lưu ý:</strong> Chỉ các thiết bị đã được{" "}
           <em>cấp quyền truy cập trước đó</em> mới hiển thị ở đây (USB, Serial,
-          Bluetooth). Nếu thiết bị không xuất hiện, hãy cắm lại rồi nhấn{" "}
-          <strong>Quét lại</strong> và cho phép quyền khi trình duyệt hỏi.
+          Bluetooth). Trên Android, WebUSB/Web Serial còn phụ thuộc trình duyệt
+          và driver của máy in; trang web không thể điều khiển trực tiếp két qua
+          dây RJ11. Nếu máy in vẫn không xuất hiện, cần dùng ứng dụng/driver POS
+          của nhà sản xuất hoặc một service in Android.
         </div>
       </div>
     </div>

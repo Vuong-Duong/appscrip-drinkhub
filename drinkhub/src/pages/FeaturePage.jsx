@@ -365,73 +365,65 @@ export default function FeaturePage() {
               </div>
             ) : (
               <div className="divide-y divide-gray-100">
-                {filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    className="flex items-center justify-between p-4 hover:bg-gray-50/50 transition-colors"
-                  >
-                    <div className="min-w-0 flex-1 pr-4">
-                      <p className="font-bold text-gray-800 text-base sm:text-lg">
-                        {product.name}
-                      </p>
-                      <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-                        Danh mục: {product.category} &bull; Tồn kho:{" "}
-                        <span
-                          className={
-                            product.stock === 0
-                              ? "text-red-500 font-bold"
-                              : "text-gray-700 font-semibold"
-                          }
-                        >
-                          {product.stock}
-                        </span>
-                      </p>
-                    </div>
+                {filteredProducts.map((product) => {
+                  const isOutOfStock = product.status === "INACTIVE";
+                  return (
+                    <div
+                      key={product.id}
+                      className="flex items-center justify-between p-4 hover:bg-gray-50/50 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1 pr-4">
+                        <p className="font-bold text-gray-800 text-base sm:text-lg">
+                          {product.name}
+                        </p>
+                        <p className="text-xs sm:text-sm text-gray-500 mt-0.5 flex items-center gap-2">
+                          <span>Danh mục: {product.category}</span>
+                          <span
+                            className={`font-semibold px-2 py-0.5 rounded-full text-xs ${
+                              isOutOfStock
+                                ? "bg-red-100 text-red-700"
+                                : "bg-emerald-100 text-emerald-700"
+                            }`}
+                          >
+                            {isOutOfStock ? "• Đang hết món" : "• Đang phục vụ"}
+                          </span>
+                        </p>
+                      </div>
 
-                    <div className="flex-shrink-0">
-                      {product.stock > 0 ? (
-                        <button
-                          onClick={() => {
-                            setConfirmModal({ isOpen: true, product });
-                          }}
-                          className="px-4 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-sm font-bold transition-all shadow-sm cursor-pointer"
-                        >
-                          Báo Hết
-                        </button>
-                      ) : (
-                        <button
-                          onClick={async () => {
-                            const newStockStr = prompt(
-                              `Nhập số lượng tồn kho mới cho "${product.name}":`,
-                              "100",
-                            );
-                            if (newStockStr !== null) {
-                              const qty = parseInt(newStockStr, 10);
-                              if (!isNaN(qty) && qty >= 0) {
-                                try {
-                                  await CrudService.update("products", {
-                                    ...product,
-                                    stock: qty,
-                                  });
-                                  showToast(
-                                    `Đã cập nhật lại tồn kho món "${product.name}" thành ${qty}!`,
-                                  );
-                                } catch (err) {
-                                  showToast(`Lỗi: ${err.message}`, "error");
-                                }
-                              } else {
-                                showToast("Số lượng không hợp lệ!", "error");
+                      <div className="flex-shrink-0">
+                        {!isOutOfStock ? (
+                          <button
+                            onClick={() => {
+                              setConfirmModal({ isOpen: true, product });
+                            }}
+                            className="px-4 py-2 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl text-sm font-bold transition-all shadow-sm cursor-pointer"
+                          >
+                            Báo Hết
+                          </button>
+                        ) : (
+                          <button
+                            onClick={async () => {
+                              try {
+                                await CrudService.update("products", {
+                                  ...product,
+                                  status: "ACTIVE",
+                                });
+                                showToast(
+                                  `Đã mở lại món "${product.name}" thành công!`,
+                                );
+                              } catch (err) {
+                                showToast(`Lỗi: ${err.message}`, "error");
                               }
-                            }
-                          }}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-sm font-bold transition-all shadow-sm cursor-pointer"
-                        >
-                          Mở lại món
-                        </button>
-                      )}
+                            }}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-sm font-bold transition-all shadow-sm cursor-pointer"
+                          >
+                            Mở lại món
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -469,7 +461,7 @@ export default function FeaturePage() {
                     try {
                       await CrudService.update("products", {
                         ...product,
-                        stock: 0,
+                        status: "INACTIVE",
                       });
                       showToast(`Đã báo hết món "${product.name}" thành công!`);
                     } catch (err) {

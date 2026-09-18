@@ -281,6 +281,13 @@ class AppStore {
           status: "occupied",
           currentOrderId: openOrderId,
         };
+      } else if (String(t.status || "").trim().toLowerCase() === "occupied") {
+        // Giữ nguyên trạng thái occupied từ Firebase nếu server đã đánh dấu là đang có khách
+        return {
+          ...t,
+          status: "occupied",
+          currentOrderId: t.currentOrderId || null,
+        };
       } else {
         return {
           ...t,

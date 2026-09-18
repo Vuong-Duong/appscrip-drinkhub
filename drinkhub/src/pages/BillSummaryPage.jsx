@@ -90,7 +90,10 @@ export default function BillSummaryPage() {
         phone: "Số điện thoại",
       };
 
-      printReceipt(receiptData, tableData, restaurantData, ["order_slip", "payment_receipt"]);
+      printReceipt(receiptData, tableData, restaurantData, [
+        "order_slip",
+        "payment_receipt",
+      ]);
 
       console.log("Phiếu đặt đồ & Hóa đơn được gửi đến máy in:", receiptId);
     } catch (err) {
@@ -178,7 +181,10 @@ export default function BillSummaryPage() {
           phone: "Số điện thoại",
         };
 
-        printReceipt(receiptData, tableData, restaurantData, ["order_slip", "payment_receipt"]);
+        printReceipt(receiptData, tableData, restaurantData, [
+          "order_slip",
+          "payment_receipt",
+        ]);
       } catch (printErr) {
         console.error("Auto print failed:", printErr);
       }
@@ -209,27 +215,32 @@ export default function BillSummaryPage() {
         try {
           let finalOrderId = orderId;
           let finalAmount = amount;
-          const isLocalTempId = String(orderId).startsWith("ord_local_") || String(orderId).startsWith("ord_17");
+          const isLocalTempId = String(orderId).startsWith("ord_local_");
+          const existingOrderId = orderData.existingOrderId;
+          const newCartItems = orderData.newCartItems || [];
 
-          if (!orderData.existingOrderId || isLocalTempId) {
+          if (!existingOrderId || isLocalTempId) {
             const serverOrder = await orderApi.createOrder({
               ...orderData,
               id: orderId,
               status: "CLOSED",
               paymentStatus: "PAID",
             });
-            if (serverOrder && serverOrder.id && String(serverOrder.id) !== String(orderId)) {
+            if (
+              serverOrder &&
+              serverOrder.id &&
+              String(serverOrder.id) !== String(orderId)
+            ) {
               appStore.remove("orders", orderId, true);
             }
             finalOrderId = serverOrder?.id || orderId;
             finalAmount = Number(serverOrder?.grandTotal) || amount;
-          } else if (orderData.newCartItems && orderData.newCartItems.length > 0) {
+          } else if (newCartItems.length > 0) {
             const result = await orderApi.addItems(
-              orderData.existingOrderId,
-              orderData.newCartItems,
+              existingOrderId,
+              newCartItems,
               orderData.discount,
             );
-            orderData.newCartItems = [];
             finalAmount = Number(result?.grandTotal) || amount;
           }
 
@@ -241,9 +252,10 @@ export default function BillSummaryPage() {
           });
         } catch (syncErr) {
           console.error("Background payment sync failed:", syncErr);
-          const errMsg = syncErr?.code === "REQUEST_TIMEOUT"
-            ? "Mạng phản hồi chậm: Đơn hàng đã ghi nhận cục bộ và sẽ tự động đồng bộ khi kết nối ổn định"
-            : "Lỗi đồng bộ thanh toán lên máy chủ";
+          const errMsg =
+            syncErr?.code === "REQUEST_TIMEOUT"
+              ? "Mạng phản hồi chậm: Đơn hàng đã ghi nhận cục bộ và sẽ tự động đồng bộ khi kết nối ổn định"
+              : "Lỗi đồng bộ thanh toán lên máy chủ";
           appStore.setError(errMsg);
         }
       })();
@@ -313,8 +325,11 @@ export default function BillSummaryPage() {
               <h3 className="text-lg font-bold mb-4">Danh sách sản phẩm</h3>
               <div className="space-y-3">
                 {orderData.items.map((item, idx) => {
-                  const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
-                  const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+                  const hasToppings =
+                    Array.isArray(item.toppings) && item.toppings.length > 0;
+                  const hasNotes =
+                    (Array.isArray(item.notes) && item.notes.length > 0) ||
+                    Boolean(item.customNote);
 
                   return (
                     <div
@@ -323,7 +338,9 @@ export default function BillSummaryPage() {
                     >
                       <div className="flex justify-between items-start">
                         <div className="flex-1">
-                          <p className="font-semibold text-gray-800">{item.productName || item.name}</p>
+                          <p className="font-semibold text-gray-800">
+                            {item.productName || item.name}
+                          </p>
                           <p className="text-sm text-gray-500">
                             {item.quantity} x {formatCurrency(item.unitPrice)}
                           </p>
@@ -337,9 +354,17 @@ export default function BillSummaryPage() {
                         <div className="pl-3 text-xs text-blue-700 space-y-0.5 border-l-2 border-blue-300">
                           {item.toppings.map((top, tIdx) => (
                             <div key={tIdx} className="flex justify-between">
-                              <span>+ {top.name || top.productName} (x{top.quantity || 1})</span>
+                              <span>
+                                + {top.name || top.productName} (x
+                                {top.quantity || 1})
+                              </span>
                               {Number(top.price || 0) > 0 && (
-                                <span className="font-medium">+{formatCurrency(Number(top.price) * (top.quantity || 1))}</span>
+                                <span className="font-medium">
+                                  +
+                                  {formatCurrency(
+                                    Number(top.price) * (top.quantity || 1),
+                                  )}
+                                </span>
                               )}
                             </div>
                           ))}
@@ -348,7 +373,8 @@ export default function BillSummaryPage() {
 
                       {hasNotes && (
                         <div className="pl-3 text-xs text-amber-700 italic border-l-2 border-amber-300">
-                          📝 {item.notes?.join(", ")} {item.customNote && `("${item.customNote}")`}
+                          📝 {item.notes?.join(", ")}{" "}
+                          {item.customNote && `("${item.customNote}")`}
                         </div>
                       )}
                     </div>
@@ -419,9 +445,15 @@ export default function BillSummaryPage() {
                   onClick={() => {
                     import("../utils/stickerPrint").then((m) => {
                       m.printCupStickers(
-                        { id: orderData.existingOrderId || `ORD${Date.now().toString().slice(-6)}`, items: orderData.items, tableName: orderData.tableName },
+                        {
+                          id:
+                            orderData.existingOrderId ||
+                            `ORD${Date.now().toString().slice(-6)}`,
+                          items: orderData.items,
+                          tableName: orderData.tableName,
+                        },
                         { number: orderData.tableName },
-                        storeInfo
+                        storeInfo,
                       );
                     });
                   }}
