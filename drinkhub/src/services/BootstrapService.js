@@ -9,6 +9,7 @@ import ApiService from "./ApiService.js";
 import { request } from "../api/Api.js";
 
 let _initialized = false;
+let _refreshInProgress = false; // 🔥 MOBILE FIX: Prevent concurrent refreshes
 
 class BootstrapService {
   /**
@@ -118,17 +119,54 @@ class BootstrapService {
       }
     });
 
-    // Đồng bộ đơn hàng từ server, giữ lại các đơn nháp cục bộ chưa gửi (ord_local_)
+    // Đồng bộ đơn hàng từ server, nhưng merge thông minh với local changes
     if (freshData.orders && Array.isArray(freshData.orders)) {
       const currentOrders = AppStore.get("orders") || [];
+      
+      // 1. Giữ lại các đơn nháp cục bộ chưa gửi (ord_local_)
       const pendingLocalOrders = currentOrders.filter((o) =>
         String(o.id || "").startsWith("ord_local_"),
       );
+      
       const serverOrderIds = new Set(freshData.orders.map((o) => o.id));
       const filteredPending = pendingLocalOrders.filter(
         (o) => !serverOrderIds.has(o.id),
       );
-      AppStore.set("orders", [...filteredPending, ...freshData.orders], true);
+      
+      // 2. Merge orders: ưu tiên local nếu được modified gần đây (< 10s) - tăng thời gian bảo vệ
+      const localOrderMap = new Map(
+        currentOrders
+          .filter((o) => !String(o.id || "").startsWith("ord_local_"))
+          .map((o) => [o.id, o])
+      );
+      
+      const now = Date.now();
+      const RECENT_THRESHOLD = 10000; // 10 seconds - tăng từ 30s để nhanh hơn
+      
+      const mergedOrders = freshData.orders.map((serverOrder) => {
+        const localOrder = localOrderMap.get(serverOrder.id);
+        if (!localOrder) return serverOrder;
+        
+        // Nếu local order vừa được modify (< 10s), giữ local version
+        if (localOrder._locallyModified) {
+          const modTime = new Date(localOrder._locallyModified).getTime();
+          if (now - modTime < RECENT_THRESHOLD) {
+            return localOrder; // Giữ local vì vừa thêm món
+          }
+        }
+        
+        // Fallback: so sánh updatedAt
+        const localTime = new Date(localOrder.updatedAt || 0).getTime();
+        const serverTime = new Date(serverOrder.updatedAt || 0).getTime();
+        
+        if (localTime > serverTime) {
+          return localOrder;
+        }
+        
+        return serverOrder;
+      });
+      
+      AppStore.set("orders", [...filteredPending, ...mergedOrders], true);
     }
 
     // Cập nhật danh sách bàn từ server (Firestore là nguồn chuẩn duy nhất)
@@ -136,7 +174,14 @@ class BootstrapService {
     if (freshData.tables && Array.isArray(freshData.tables)) {
       const currentTables = AppStore.get("tables") || [];
       const localTempMap = new Map();
+      
+      // Track tables with recent local modifications (< 5 seconds)
+      const recentlyModifiedTables = new Set();
+      const now = Date.now();
+      const RECENT_THRESHOLD = 15000; // 🔥 MOBILE FIX: 15s (tăng từ 5s cho Android chậm)
+      
       currentTables.forEach((t) => {
+        // Preserve local temp orders
         if (
           t.status === "occupied" &&
           t.currentOrderId &&
@@ -144,13 +189,33 @@ class BootstrapService {
         ) {
           localTempMap.set(String(t.id), t.currentOrderId);
         }
+        
+        // Track recently modified tables (e.g., just paid)
+        if (t._locallyModified) {
+          const modTime = new Date(t._locallyModified).getTime();
+          if (now - modTime < RECENT_THRESHOLD) {
+            recentlyModifiedTables.add(String(t.id));
+          }
+        }
       });
 
       const mergedTables = freshData.tables.map((t) => {
-        const tempOrderId = localTempMap.get(String(t.id));
+        const tableId = String(t.id);
+        
+        // Don't overwrite recently modified tables (optimistic updates)
+        if (recentlyModifiedTables.has(tableId)) {
+          const localTable = currentTables.find((lt) => String(lt.id) === tableId);
+          if (localTable) {
+            return localTable; // Keep local version
+          }
+        }
+        
+        // Preserve local temp orders
+        const tempOrderId = localTempMap.get(tableId);
         if (tempOrderId) {
           return { ...t, status: "occupied", currentOrderId: tempOrderId };
         }
+        
         return {
           ...t,
           status: String(t.status || "").trim().toLowerCase(),
@@ -166,8 +231,13 @@ class BootstrapService {
    * Also uses safe refresh to protect order data
    */
   static async forceRefresh() {
+    // 🔥 MOBILE FIX: Skip if already refreshing (Android fires multiple events)
+    if (_refreshInProgress) {
+      return;
+    }
+    _refreshInProgress = true;
+    
     try {
-      console.log("[Bootstrap] Force refresh requested");
       AppStore.setLoading(true);
 
       const freshData = await ApiService.refreshAll();
@@ -179,6 +249,7 @@ class BootstrapService {
       throw e;
     } finally {
       AppStore.setLoading(false);
+      _refreshInProgress = false;
     }
   }
 

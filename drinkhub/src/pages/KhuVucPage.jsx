@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
@@ -16,7 +16,11 @@ export default function TablePage() {
   const [storeState, setStoreState] = useState(appStore.getState());
   const [activeTab, setActiveTab] = useState("ban");
   const [tables, setTables] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    const state = appStore.getState();
+    const t = Array.isArray(state.tables) ? state.tables : [];
+    return t.length === 0 && state.loading;
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -32,33 +36,8 @@ export default function TablePage() {
     CustomerDisplayService.sendReset();
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = appStore.subscribe((state) => {
-      setStoreState({ ...state });
-      const newTables = Array.isArray(state.tables) ? state.tables : [];
-      setTables(newTables);
-      // Only show loading if there's NO data yet and global loading is true
-      setIsLoading(state.loading && newTables.length === 0);
-      setError(state.error || "");
-    });
-
-    const initialTables = appStore.get("tables") || [];
-    setTables(initialTables);
-    // If we have cached data, don't show loading
-    setIsLoading(initialTables.length === 0 && appStore.getState().loading);
-
-    // Tự động tải dữ liệu bàn mới nhất từ Firebase khi mở trang và khi quay lại tab
-    handleRefresh();
-    const onFocus = () => handleRefresh();
-    window.addEventListener("focus", onFocus);
-
-    return () => {
-      unsubscribe();
-      window.removeEventListener("focus", onFocus);
-    };
-  }, []);
-
-  const handleRefresh = async () => {
+  // ⚡ useCallback để fix stale closure trên Android
+  const handleRefresh = useCallback(async () => {
     try {
       setIsRefreshing(true);
       setError("");
@@ -68,7 +47,79 @@ export default function TablePage() {
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, []);
+
+  // Helper: fix bảng bị stuck từ orders hiện tại trong store
+  const fixStaleTables = useCallback((tables, orders) => {
+    return tables.map((table) => {
+      if (table.status === "occupied" && table.currentOrderId) {
+        const order = orders.find((o) => o.id === table.currentOrderId);
+        if (order && (order.paymentStatus === "PAID" || order.status === "CLOSED")) {
+          return { ...table, status: "available", currentOrderId: "" };
+        }
+      }
+      return table;
+    });
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = appStore.subscribe((state) => {
+      setStoreState({ ...state });
+      const rawTables = Array.isArray(state.tables) ? state.tables : [];
+      const orders = state.orders || [];
+      const fixedTables = fixStaleTables(rawTables, orders);
+      setTables(fixedTables);
+      setIsLoading(state.loading && fixedTables.length === 0);
+      setError(state.error || "");
+    });
+
+    // Load initial state
+    const initialState = appStore.getState();
+    const rawTables = Array.isArray(initialState.tables) ? initialState.tables : [];
+    const orders = initialState.orders || [];
+    const fixedTables = fixStaleTables(rawTables, orders);
+    setTables(fixedTables);
+    setIsLoading(fixedTables.length === 0 && initialState.loading);
+
+    // 🔥 MOBILE FIX 1: Page Visibility API — bắt sự kiện Android wake up từ sleep/background
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleRefresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // 🔥 MOBILE FIX 2: window focus — cho desktop và Android browser switch tab
+    const handleFocus = () => handleRefresh();
+    window.addEventListener("focus", handleFocus);
+
+    // 🔥 MOBILE FIX 3: localStorage storage event — nhận payment event từ cùng tab trên Android
+    // (Android single-tab WebView cần check này)
+    const handleStorage = (e) => {
+      if (e.key === "table_payment_event" && e.newValue) {
+        handleRefresh();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    // 🔥 MOBILE FIX 4: pageshow event — Android Chrome aggressive BFCache (Back-Forward Cache)
+    // khi user nhấn back, Chrome restore page từ cache mà không re-render
+    const handlePageShow = (e) => {
+      if (e.persisted) {
+        // Page được restore từ BFCache — force reload state
+        handleRefresh();
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+
+    return () => {
+      unsubscribe();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, [handleRefresh, fixStaleTables]);
 
   const handleCreateTable = async () => {
     const name = newTableName.trim();

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
-import { orderApi, paymentApi } from "../api/Api";
+import { orderApi, paymentApi, tableApi } from "../api/Api";
 import { formatCurrency } from "../utils/helpers";
 import { printReceipt } from "../utils/receipt";
 import appStore from "../services/AppStore";
@@ -56,13 +56,13 @@ export default function BillSummaryPage() {
     });
   }, [orderData, storeInfo]);
 
-  const handlePrintReceipt = () => {
+  const handlePrintReceipt = async () => {
     const receiptId =
       createdOrder?.id || orderData?.existingOrderId || `ord_${Date.now()}`;
     setIsPrinting(true);
 
     try {
-      const receiptData = {
+      const paymentReceiptData = {
         id: receiptId,
         items: orderData.items.map((item) => ({
           name: item.productName || item.name,
@@ -79,6 +79,25 @@ export default function BillSummaryPage() {
         total: orderData.grandTotal,
       };
 
+      const newCartItems = orderData.newCartItems || [];
+      const orderSlipItems =
+        orderData.existingOrderId && newCartItems.length > 0
+          ? newCartItems
+          : orderData.items;
+      const orderSlipData = {
+        ...paymentReceiptData,
+        items: orderSlipItems,
+        subtotal: orderSlipItems.reduce(
+          (sum, item) => sum + Number(item.subtotal || 0),
+          0,
+        ),
+        discount: 0,
+        total: orderSlipItems.reduce(
+          (sum, item) => sum + Number(item.subtotal || 0),
+          0,
+        ),
+      };
+
       const tableData = {
         number: orderData.tableName || "N/A",
         guestCount: "1",
@@ -90,10 +109,18 @@ export default function BillSummaryPage() {
         phone: "Số điện thoại",
       };
 
-      printReceipt(receiptData, tableData, restaurantData, [
-        "order_slip",
+      await printReceipt(
+        paymentReceiptData,
+        tableData,
+        restaurantData,
         "payment_receipt",
-      ]);
+      );
+      await printReceipt(
+        orderSlipData,
+        tableData,
+        restaurantData,
+        "order_slip",
+      );
 
       console.log("Phiếu đặt đồ & Hóa đơn được gửi đến máy in:", receiptId);
     } catch (err) {
@@ -115,6 +142,12 @@ export default function BillSummaryPage() {
     try {
       const currentOrders = appStore.get("orders") || [];
       const existingOrderObj = currentOrders.find((o) => o.id === orderId);
+      
+      // ✅ Check if order already paid
+      if (existingOrderObj?.paymentStatus === "PAID" || existingOrderObj?.status === "CLOSED") {
+        navigate("/khu-vuc", { replace: true });
+        return;
+      }
 
       const closedOrder = {
         id: orderId,
@@ -152,43 +185,6 @@ export default function BillSummaryPage() {
         ),
       );
 
-      try {
-        const receiptData = {
-          id: orderId,
-          items: orderData.items.map((item) => ({
-            name: item.productName || item.name,
-            quantity: item.quantity,
-            price: item.unitPrice || item.price,
-            total: item.subtotal,
-            toppings: item.toppings || [],
-            notes: item.notes || [],
-            customNote: item.customNote || "",
-          })),
-          subtotal: orderData.subtotal,
-          discount: orderData.discount,
-          tax: 0,
-          total: orderData.grandTotal,
-        };
-
-        const tableData = {
-          number: orderData.tableName || "N/A",
-          guestCount: "1",
-        };
-
-        const restaurantData = storeInfo || {
-          name: "Quán Nước Quỳnh Anh",
-          address: "Địa chỉ nhà hàng",
-          phone: "Số điện thoại",
-        };
-
-        printReceipt(receiptData, tableData, restaurantData, [
-          "order_slip",
-          "payment_receipt",
-        ]);
-      } catch (printErr) {
-        console.error("Auto print failed:", printErr);
-      }
-
       // Chuyển hướng & cập nhật màn hình phụ ngay lập tức
       CustomerDisplayService.sendCheckout({
         tableName: orderData.tableName,
@@ -208,7 +204,127 @@ export default function BillSummaryPage() {
       });
       CustomerDisplayService.sendSuccess();
 
+      // ⚡ Print in background (non-blocking) - move AFTER navigate
+      const printAsync = async () => {
+        try {
+          const paymentReceiptData = {
+            id: orderId,
+            items: orderData.items.map((item) => ({
+              name: item.productName || item.name,
+              quantity: item.quantity,
+              price: item.unitPrice || item.price,
+              total: item.subtotal,
+              toppings: item.toppings || [],
+              notes: item.notes || [],
+              customNote: item.customNote || "",
+            })),
+            subtotal: orderData.subtotal,
+            discount: orderData.discount,
+            tax: 0,
+            total: orderData.grandTotal,
+          };
+
+          const newCartItems = orderData.newCartItems || [];
+          const orderSlipItems =
+            orderData.existingOrderId && newCartItems.length > 0
+              ? newCartItems
+              : orderData.items;
+          const orderSlipData = {
+            ...paymentReceiptData,
+            items: orderSlipItems,
+            subtotal: orderSlipItems.reduce(
+              (sum, item) => sum + Number(item.subtotal || 0),
+              0,
+            ),
+            discount: 0,
+            total: orderSlipItems.reduce(
+              (sum, item) => sum + Number(item.subtotal || 0),
+              0,
+            ),
+          };
+
+          const tableData = {
+            number: orderData.tableName || "N/A",
+            guestCount: "1",
+          };
+
+          const restaurantData = storeInfo || {
+            name: "Quán Nước Quỳnh Anh",
+            address: "Địa chỉ nhà hàng",
+            phone: "Số điện thoại",
+          };
+
+          await printReceipt(
+            paymentReceiptData,
+            tableData,
+            restaurantData,
+            "payment_receipt",
+          );
+          await printReceipt(
+            orderSlipData,
+            tableData,
+            restaurantData,
+            "order_slip",
+          );
+        } catch (printErr) {
+          console.error("Auto print failed:", printErr);
+        }
+      };
+
+      // ✅ OPTIMISTIC UPDATE: Cập nhật trạng thái bàn ngay lập tức
+      if (orderData.tableId) {
+        const currentTables = appStore.get("tables") || [];
+        
+        const now = new Date().toISOString();
+        const updatedTables = currentTables.map((table) => {
+          const match = String(table.id) === String(orderData.tableId);
+          if (match) {
+            return {
+              ...table,
+              status: "available",
+              currentOrderId: "",
+              _locallyModified: now,
+            };
+          }
+          return table;
+        });
+        appStore.set("tables", updatedTables, true);
+        
+        // 🔥 MOBILE FIX: Broadcast table update via localStorage event
+        // Để mobile browsers/tabs khác cũng nhận được update
+        try {
+          localStorage.setItem('table_payment_event', JSON.stringify({
+            tableId: orderData.tableId,
+            status: 'available',
+            timestamp: Date.now()
+          }));
+          // Remove immediately để trigger event lần nữa khi cần
+          setTimeout(() => {
+            localStorage.removeItem('table_payment_event');
+          }, 100);
+        } catch (e) {
+          console.error("Failed to broadcast table update:", e);
+        }
+      }
+
+      // ✅ OPTIMISTIC UPDATE: Cập nhật order status ngay lập tức
+      const allOrders = appStore.get("orders") || [];
+      const updatedOrders = allOrders.map((order) => {
+        if (order.id === orderId) {
+          return {
+            ...order,
+            status: "CLOSED",
+            paymentStatus: "PAID",
+          };
+        }
+        return order;
+      });
+      appStore.set("orders", updatedOrders, true);
+      
       navigate("/khu-vuc", { replace: true });
+      
+      // ⚡ Start background print (don't wait)
+      printAsync();
 
       // Đồng bộ ngầm lên server (Background Sync)
       (async () => {
@@ -250,8 +366,26 @@ export default function BillSummaryPage() {
             amount: finalAmount,
             transactionId: `manual_${finalOrderId}_${Date.now()}`,
           });
+          
+          // ✅ Force refresh table status từ server sau khi payment thành công
+          const freshTables = await tableApi.getTables(true); // Force refresh
+          appStore.set("tables", freshTables, true);
+          
+        // 🔥 MOBILE FIX: Clear localStorage cache để mobile không dùng cache cũ
+          try {
+            localStorage.removeItem('drinkhub:local_tables');
+          } catch (e) {
+            console.error("Failed to clear tables cache:", e);
+          }
+          
         } catch (syncErr) {
           console.error("Background payment sync failed:", syncErr);
+          
+          // Ignore ORDER_ALREADY_FROZEN - đơn đã được thanh toán trước đó
+          if (syncErr?.message?.includes("ORDER_ALREADY_FROZEN")) {
+            return; // Không hiển thị error cho user
+          }
+          
           const errMsg =
             syncErr?.code === "REQUEST_TIMEOUT"
               ? "Mạng phản hồi chậm: Đơn hàng đã ghi nhận cục bộ và sẽ tự động đồng bộ khi kết nối ổn định"

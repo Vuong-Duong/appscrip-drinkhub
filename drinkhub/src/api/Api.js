@@ -721,6 +721,8 @@ export const orderApi = {
         discount !== undefined && discount !== null
           ? Number(discount) || 0
           : Number(existing.discount) || 0;
+      
+      const now = new Date().toISOString();
       appStore.update(
         "orders",
         {
@@ -729,17 +731,35 @@ export const orderApi = {
           subtotal: newSubtotal,
           discount: safeDiscount,
           grandTotal: newSubtotal - safeDiscount,
-          updatedAt: new Date().toISOString(),
+          updatedAt: now,
+          _locallyModified: now, // Mark as locally modified
         },
         true,
       );
     }
 
-    // Send to backend — return real promise, DO NOT swallow errors
+    // Send to backend — return real promise, handle response
     return request("ADD_ITEMS_TO_ORDER", {
       orderId,
       items: normItems,
       discount,
+    }).then((serverOrder) => {
+      // Server success: update with server data and clear local flag
+      if (serverOrder && serverOrder.id) {
+        const orders = appStore.get("orders") || [];
+        const updated = orders.map((o) => {
+          if (String(o.id) === String(serverOrder.id)) {
+            // Merge server response, clear local flag
+            return {
+              ...serverOrder,
+              _locallyModified: undefined,
+            };
+          }
+          return o;
+        });
+        appStore.set("orders", updated, true);
+      }
+      return serverOrder;
     });
   },
 
@@ -980,7 +1000,16 @@ export const discountApi = {
  * ========================= */
 
 export const tableApi = {
-  async getTables() {
+  async getTables(forceRefresh = false) {
+    if (forceRefresh) {
+      // Force wait for server response
+      const tables = await request("GET_TABLES");
+      const normTables = Array.isArray(tables) ? tables.map(normalizeTable) : [];
+      writeLocalArray(LOCAL_DB_KEY.TABLES, normTables);
+      return normTables;
+    }
+    
+    // Normal: return cache immediately, fetch in background
     request("GET_TABLES")
       .then((tables) => {
         const normTables = Array.isArray(tables) ? tables.map(normalizeTable) : [];

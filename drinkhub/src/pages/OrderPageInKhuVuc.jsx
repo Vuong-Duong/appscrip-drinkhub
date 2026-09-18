@@ -31,7 +31,7 @@ export default function OrderPage() {
   const [cart, setCart] = useState([]);
   const [activeCategory, setActiveCategory] = useState("");
   const [search, setSearch] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => appStore.getState().loading);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [showCustomerModal, setShowCustomerModal] = useState(false);
@@ -59,8 +59,15 @@ export default function OrderPage() {
   const [isConfirmedForDisplay, setIsConfirmedForDisplay] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
 
-  const [toppingModal, setToppingModal] = useState({ isOpen: false, itemIndex: -1 });
-  const [noteModal, setNoteModal] = useState({ isOpen: false, itemIndex: -1, customText: "" });
+  const [toppingModal, setToppingModal] = useState({
+    isOpen: false,
+    itemIndex: -1,
+  });
+  const [noteModal, setNoteModal] = useState({
+    isOpen: false,
+    itemIndex: -1,
+    customText: "",
+  });
 
   const PRESET_NOTES = [
     "Ít đá",
@@ -134,6 +141,28 @@ export default function OrderPage() {
     const allOrders = storeState.orders || [];
     const order = allOrders.find((o) => o.id === selectedTable.currentOrderId);
     if (!order) return null;
+    
+    // ✅ Nếu order đã PAID, clear table status và return null
+    if (order.paymentStatus === "PAID" || order.status === "CLOSED") {
+      console.log("[OrderPage] Order already paid, clearing table status");
+      
+      // Optimistic clear table
+      const currentTables = appStore.get("tables") || [];
+      const updatedTables = currentTables.map((t) => {
+        if (String(t.id) === String(selectedTable.id)) {
+          return {
+            ...t,
+            status: "available",
+            currentOrderId: "",
+            _locallyModified: new Date().toISOString(),
+          };
+        }
+        return t;
+      });
+      appStore.set("tables", updatedTables, true);
+      
+      return null;
+    }
 
     // Join order details, preferring embedded order.items
     const allDetails = storeState.orderDetails || [];
@@ -173,15 +202,21 @@ export default function OrderPage() {
       .catch((err) => {
         console.warn("Failed to fetch existing order from server:", err);
       });
-  }, [selectedTable?.currentOrderId, existingOrder, isOccupied, decodedTableId]);
+  }, [
+    selectedTable?.currentOrderId,
+    existingOrder,
+    isOccupied,
+    decodedTableId,
+  ]);
 
   const hasExistingOrder = Boolean(existingOrder);
 
   const toppingProducts = useMemo(() => {
     return products.filter(
       (p) =>
-        String(p.category || "").trim().toLowerCase() === "topping" &&
-        p.status !== "DELETED",
+        String(p.category || "")
+          .trim()
+          .toLowerCase() === "topping" && p.status !== "DELETED",
     );
   }, [products]);
 
@@ -236,7 +271,9 @@ export default function OrderPage() {
 
     setCart((prev) => {
       setError("");
-      const existingIndex = prev.findIndex((item) => areItemsEqual(item, newItemCandidate));
+      const existingIndex = prev.findIndex((item) =>
+        areItemsEqual(item, newItemCandidate),
+      );
       if (existingIndex !== -1) {
         return prev.map((item, idx) =>
           idx === existingIndex
@@ -260,23 +297,28 @@ export default function OrderPage() {
         return prev.filter((_, idx) => idx !== itemIndex);
       }
 
-      return prev.map((i, idx) => (idx === itemIndex ? { ...i, quantity: newQty } : i));
+      return prev.map((i, idx) =>
+        idx === itemIndex ? { ...i, quantity: newQty } : i,
+      );
     });
   };
 
-  // Subtotal for NEW items in cart (bao gồm giá Toppings)
-  const cartSubtotal = cart.reduce(
-    (sum, item) => sum + calculateItemSubtotal(item),
-    0,
+  // Subtotal for NEW items in cart (bao gồm giá Toppings) - MEMOIZED
+  const cartSubtotal = useMemo(
+    () => cart.reduce((sum, item) => sum + calculateItemSubtotal(item), 0),
+    [cart]
   );
 
-  // Subtotal for EXISTING items (if any)
-  const existingSubtotal = hasExistingOrder
-    ? (existingOrder.items || []).reduce(
-        (sum, item) => sum + Number(item.subtotal || 0),
-        0,
-      )
-    : 0;
+  // Subtotal for EXISTING items (if any) - MEMOIZED
+  const existingSubtotal = useMemo(
+    () => hasExistingOrder
+      ? (existingOrder.items || []).reduce(
+          (sum, item) => sum + Number(item.subtotal || 0),
+          0,
+        )
+      : 0,
+    [hasExistingOrder, existingOrder]
+  );
 
   // Combined subtotal
   const subtotal = existingSubtotal + cartSubtotal;
@@ -329,7 +371,12 @@ export default function OrderPage() {
     if (coupon.status !== "ACTIVE") return "Mã giảm giá không còn hoạt động";
 
     const usedCount = Number(coupon.usedCount || 0);
-    const usageLimit = coupon.usageLimit !== undefined && coupon.usageLimit !== null && coupon.usageLimit !== "" ? Number(coupon.usageLimit) : null;
+    const usageLimit =
+      coupon.usageLimit !== undefined &&
+      coupon.usageLimit !== null &&
+      coupon.usageLimit !== ""
+        ? Number(coupon.usageLimit)
+        : null;
     if (usageLimit !== null && usageLimit > 0 && usedCount >= usageLimit) {
       return "Mã giảm giá đã hết lượt sử dụng";
     }
@@ -352,8 +399,14 @@ export default function OrderPage() {
     return (storeState.discounts || []).filter((c) => {
       if (c.status !== "ACTIVE") return false;
       const usedCount = Number(c.usedCount || 0);
-      const usageLimit = c.usageLimit !== undefined && c.usageLimit !== null && c.usageLimit !== "" ? Number(c.usageLimit) : null;
-      if (usageLimit !== null && usageLimit > 0 && usedCount >= usageLimit) return false;
+      const usageLimit =
+        c.usageLimit !== undefined &&
+        c.usageLimit !== null &&
+        c.usageLimit !== ""
+          ? Number(c.usageLimit)
+          : null;
+      if (usageLimit !== null && usageLimit > 0 && usedCount >= usageLimit)
+        return false;
       return true;
     });
   }, [storeState.discounts]);
@@ -472,16 +525,20 @@ export default function OrderPage() {
     navigate("/bill-summary", { state: { orderData } });
   };
 
-  // === Print receipt for the current items in the cart ===
-  const printCurrentCartReceipt = (orderId, isNewOrder = false) => {
+  // === Print only the items from the current order action ===
+  const printOrderSlip = (orderId, items, isNewOrder = false) => {
     try {
+      const subtotal = items.reduce(
+        (sum, item) => sum + Number(item.subtotal || 0),
+        0,
+      );
       const receiptData = {
         id: isNewOrder ? orderId : `${orderId} (Gọi thêm)`,
-        items: cart.map(mapCartItemToOrderItem),
-        subtotal: cartSubtotal,
+        items,
+        subtotal,
         discount: isNewOrder ? safeDiscount : 0,
         tax: 0,
-        total: isNewOrder ? cartSubtotal - safeDiscount : cartSubtotal,
+        total: isNewOrder ? subtotal - safeDiscount : subtotal,
       };
 
       const tableData = {
@@ -569,14 +626,21 @@ export default function OrderPage() {
         ),
       );
 
-
       // Trigger local discount usage increment
       if (appliedDiscountCode && safeDiscount > 0) {
         const currentDiscounts = appStore.get("discounts") || [];
         const updatedDiscounts = currentDiscounts.map((d) => {
-          if (String(d.code || "").toUpperCase() === String(appliedDiscountCode || "").toUpperCase()) {
+          if (
+            String(d.code || "").toUpperCase() ===
+            String(appliedDiscountCode || "").toUpperCase()
+          ) {
             const newUsed = Number(d.usedCount || 0) + 1;
-            const limit = d.usageLimit !== undefined && d.usageLimit !== null && d.usageLimit !== "" ? Number(d.usageLimit) : null;
+            const limit =
+              d.usageLimit !== undefined &&
+              d.usageLimit !== null &&
+              d.usageLimit !== ""
+                ? Number(d.usageLimit)
+                : null;
             const isExpired = limit !== null && limit > 0 && newUsed >= limit;
             return {
               ...d,
@@ -589,8 +653,8 @@ export default function OrderPage() {
         appStore.set("discounts", updatedDiscounts);
       }
 
-      // Print slip immediately
-      printCurrentCartReceipt(tempOrderId, true);
+      // Print only the items from this new order.
+      printOrderSlip(tempOrderId, orderPayload.items, true);
 
       // 2. Trigger background sync to server — pass tempOrderId so orderApi
       //    reuses the same ID instead of generating a new one (avoids duplicate)
@@ -654,6 +718,13 @@ export default function OrderPage() {
   // === ADD ITEMS (for occupied table, without navigating away) ===
   const handleAddItems = async () => {
     if (cart.length === 0 || isSubmitting || !hasExistingOrder) return;
+    
+    // ✅ Check if order already closed/paid
+    if (existingOrder.paymentStatus === "PAID" || existingOrder.status === "CLOSED") {
+      console.log("[OrderPage] Order already closed, cannot add items");
+      setError("Đơn hàng đã thanh toán, không thể gọi thêm món");
+      return;
+    }
 
     setIsSubmitting(true);
     setError("");
@@ -676,11 +747,19 @@ export default function OrderPage() {
       const currentDetails = appStore.get("orderDetails") || [];
       appStore.set("orderDetails", [...currentDetails, ...tempDetails]);
 
+      // Clear cart immediately for fast UX
+      setCart([]);
+      setError("");
+      
+      // Navigate first (don't block on print)
+      navigate("/khu-vuc", { replace: true });
 
-      // Print slip immediately
-      printCurrentCartReceipt(orderId, false);
+      // Print in background (non-blocking)
+      setTimeout(() => {
+        printOrderSlip(orderId, newItems, false);
+      }, 100);
 
-      // 2. Send to server (orderApi.addItems handles local order.items update + backend sync)
+      // 2. Send to server (background sync)
       orderApi
         .addItems(orderId, newItems, safeDiscount)
         .then((result) => {
@@ -704,15 +783,10 @@ export default function OrderPage() {
         })
         .catch((err) => {
           console.error("Failed to sync added items:", err);
-          appStore.setError("Lỗi đồng bộ gọi thêm món lên máy chủ");
+          // Don't show error to user, already navigated away
         });
-
-      setCart([]);
-      setError("");
-      navigate("/khu-vuc", { replace: true });
     } catch (err) {
       setError(err.message || "Gọi thêm món thất bại");
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -996,8 +1070,11 @@ export default function OrderPage() {
                   📋 Đã order trước đó
                 </p>
                 {existingOrder.items.map((item, idx) => {
-                  const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
-                  const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+                  const hasToppings =
+                    Array.isArray(item.toppings) && item.toppings.length > 0;
+                  const hasNotes =
+                    (Array.isArray(item.notes) && item.notes.length > 0) ||
+                    Boolean(item.customNote);
 
                   return (
                     <div
@@ -1006,11 +1083,17 @@ export default function OrderPage() {
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-800">{item.productName || item.name}</p>
-                          <p className="text-xs text-gray-400">x{item.quantity}</p>
+                          <p className="font-medium text-gray-800">
+                            {item.productName || item.name}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            x{item.quantity}
+                          </p>
                         </div>
                         <div className="flex items-center gap-3 shrink-0">
-                          <p className="font-semibold">{formatCurrency(Number(item.subtotal || 0))}</p>
+                          <p className="font-semibold">
+                            {formatCurrency(Number(item.subtotal || 0))}
+                          </p>
                           <button
                             onClick={() =>
                               setConfirmDeleteItem({ isOpen: true, item })
@@ -1026,14 +1109,17 @@ export default function OrderPage() {
                       {hasToppings && (
                         <div className="pl-3 text-xs text-blue-700 space-y-0.5">
                           {item.toppings.map((t, i) => (
-                            <div key={i}>+ {t.name || t.productName} (x{t.quantity || 1})</div>
+                            <div key={i}>
+                              + {t.name || t.productName} (x{t.quantity || 1})
+                            </div>
                           ))}
                         </div>
                       )}
 
                       {hasNotes && (
                         <div className="pl-3 text-xs text-amber-700 italic">
-                          📝 {item.notes?.join(", ")} {item.customNote && `("${item.customNote}")`}
+                          📝 {item.notes?.join(", ")}{" "}
+                          {item.customNote && `("${item.customNote}")`}
                         </div>
                       )}
                     </div>
@@ -1064,8 +1150,11 @@ export default function OrderPage() {
                   {cart.map((item, idx) => {
                     const itemUnitPrice = calculateItemUnitPrice(item);
                     const itemSubtotal = calculateItemSubtotal(item);
-                    const hasToppings = Array.isArray(item.toppings) && item.toppings.length > 0;
-                    const hasNotes = (Array.isArray(item.notes) && item.notes.length > 0) || Boolean(item.customNote);
+                    const hasToppings =
+                      Array.isArray(item.toppings) && item.toppings.length > 0;
+                    const hasNotes =
+                      (Array.isArray(item.notes) && item.notes.length > 0) ||
+                      Boolean(item.customNote);
 
                     return (
                       <div
@@ -1074,7 +1163,9 @@ export default function OrderPage() {
                       >
                         <div className="flex justify-between items-start gap-2">
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-gray-800 text-sm">{item.name}</p>
+                            <p className="font-semibold text-gray-800 text-sm">
+                              {item.name}
+                            </p>
                             <p className="text-xs text-gray-500">
                               Đơn giá: {formatCurrency(itemUnitPrice)}
                             </p>
@@ -1087,11 +1178,24 @@ export default function OrderPage() {
                         {/* Danh sách Topping đã chọn */}
                         {hasToppings && (
                           <div className="bg-blue-50/70 rounded-xl p-2 text-xs space-y-1">
-                            <p className="font-semibold text-blue-800 text-[11px]">Topping:</p>
+                            <p className="font-semibold text-blue-800 text-[11px]">
+                              Topping:
+                            </p>
                             {item.toppings.map((top) => (
-                              <div key={top.id} className="flex justify-between items-center text-blue-700">
-                                <span>+ {top.name} (x{top.quantity || 1})</span>
-                                <span className="font-medium">+{formatCurrency(Number(top.price || 0) * (top.quantity || 1))}</span>
+                              <div
+                                key={top.id}
+                                className="flex justify-between items-center text-blue-700"
+                              >
+                                <span>
+                                  + {top.name} (x{top.quantity || 1})
+                                </span>
+                                <span className="font-medium">
+                                  +
+                                  {formatCurrency(
+                                    Number(top.price || 0) *
+                                      (top.quantity || 1),
+                                  )}
+                                </span>
                               </div>
                             ))}
                           </div>
@@ -1100,9 +1204,15 @@ export default function OrderPage() {
                         {/* Ghi chú đã chọn */}
                         {hasNotes && (
                           <div className="bg-amber-50/70 rounded-xl p-2 text-xs text-amber-800 italic">
-                            {item.notes?.length > 0 && <span>📝 {item.notes.join(", ")}</span>}
-                            {item.notes?.length > 0 && item.customNote && <span> | </span>}
-                            {item.customNote && <span>Ghi chú: "{item.customNote}"</span>}
+                            {item.notes?.length > 0 && (
+                              <span>📝 {item.notes.join(", ")}</span>
+                            )}
+                            {item.notes?.length > 0 && item.customNote && (
+                              <span> | </span>
+                            )}
+                            {item.customNote && (
+                              <span>Ghi chú: "{item.customNote}"</span>
+                            )}
                           </div>
                         )}
 
@@ -1110,7 +1220,12 @@ export default function OrderPage() {
                         <div className="flex items-center justify-between pt-1">
                           <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => setToppingModal({ isOpen: true, itemIndex: idx })}
+                              onClick={() =>
+                                setToppingModal({
+                                  isOpen: true,
+                                  itemIndex: idx,
+                                })
+                              }
                               className="px-2.5 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg text-xs font-semibold transition"
                             >
                               + Topping
@@ -1136,7 +1251,9 @@ export default function OrderPage() {
                             >
                               -
                             </button>
-                            <span className="font-bold text-sm min-w-[1rem] text-center">{item.quantity}</span>
+                            <span className="font-bold text-sm min-w-[1rem] text-center">
+                              {item.quantity}
+                            </span>
                             <button
                               onClick={() => updateQuantityByIndex(idx, 1)}
                               className="w-7 h-7 rounded-full bg-gray-100 hover:bg-gray-200 font-bold text-gray-700 flex items-center justify-center"
@@ -1235,26 +1352,37 @@ export default function OrderPage() {
               )}
 
               {/* Nút In tem dán ly (Chỉ hiển thị khi tính năng Xuất mã vạch BẬT) */}
-              {localStorage.getItem("barcodeEnabled") !== "false" && (cart.length > 0 || hasExistingOrder) && (
-                <button
-                  onClick={() => {
-                    const allItems = [
-                      ...(existingOrder?.items || []),
-                      ...cart.map(mapCartItemToOrderItem),
-                    ];
-                    import("../utils/stickerPrint").then((m) => {
-                      m.printCupStickers(
-                        { id: existingOrder?.id || `ORD${Date.now().toString().slice(-6)}`, items: allItems, tableName: selectedTable?.name || `Bàn ${decodedTableId}` },
-                        { number: selectedTable?.name || `Bàn ${decodedTableId}` },
-                        storeInfo
-                      );
-                    });
-                  }}
-                  className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-2xl font-bold text-sm transition mb-3 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                >
-                  🏷️ In tem dán ly
-                </button>
-              )}
+              {localStorage.getItem("barcodeEnabled") !== "false" &&
+                (cart.length > 0 || hasExistingOrder) && (
+                  <button
+                    onClick={() => {
+                      const allItems = [
+                        ...(existingOrder?.items || []),
+                        ...cart.map(mapCartItemToOrderItem),
+                      ];
+                      import("../utils/stickerPrint").then((m) => {
+                        m.printCupStickers(
+                          {
+                            id:
+                              existingOrder?.id ||
+                              `ORD${Date.now().toString().slice(-6)}`,
+                            items: allItems,
+                            tableName:
+                              selectedTable?.name || `Bàn ${decodedTableId}`,
+                          },
+                          {
+                            number:
+                              selectedTable?.name || `Bàn ${decodedTableId}`,
+                          },
+                          storeInfo,
+                        );
+                      });
+                    }}
+                    className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-2xl font-bold text-sm transition mb-3 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                  >
+                    🏷️ In tem dán ly
+                  </button>
+                )}
 
               {/* Nút Gọi thêm món (chỉ khi có món trong cart) */}
               {cart.length > 0 && (
@@ -1553,7 +1681,9 @@ export default function OrderPage() {
                       <p className="text-xs text-gray-500">
                         {product.category}
                         {product.status === "INACTIVE" && (
-                          <span className="ml-2 text-red-600 font-semibold">• Đang hết</span>
+                          <span className="ml-2 text-red-600 font-semibold">
+                            • Đang hết
+                          </span>
                         )}
                       </p>
                     </div>
@@ -1707,191 +1837,243 @@ export default function OrderPage() {
       )}
 
       {/* Popup Thêm Topping */}
-      {toppingModal.isOpen && toppingModal.itemIndex >= 0 && cart[toppingModal.itemIndex] && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between pb-4 border-b">
-              <div>
-                <h3 className="font-bold text-lg text-gray-800">
-                  Thêm Topping cho: {cart[toppingModal.itemIndex]?.name}
-                </h3>
-                <p className="text-xs text-gray-500">Chọn các topping đi kèm món ăn</p>
+      {toppingModal.isOpen &&
+        toppingModal.itemIndex >= 0 &&
+        cart[toppingModal.itemIndex] && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[85vh]">
+              <div className="flex items-center justify-between pb-4 border-b">
+                <div>
+                  <h3 className="font-bold text-lg text-gray-800">
+                    Thêm Topping cho: {cart[toppingModal.itemIndex]?.name}
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Chọn các topping đi kèm món ăn
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    setToppingModal({ isOpen: false, itemIndex: -1 })
+                  }
+                  className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200"
+                >
+                  ✕
+                </button>
               </div>
-              <button
-                onClick={() => setToppingModal({ isOpen: false, itemIndex: -1 })}
-                className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="flex-1 overflow-y-auto py-4 space-y-3">
-              {toppingProducts.length === 0 ? (
-                <p className="text-center text-gray-400 py-8">Chưa có sản phẩm thuộc danh mục Topping</p>
-              ) : (
-                toppingProducts.map((topProduct) => {
-                  const currentItemToppings = cart[toppingModal.itemIndex]?.toppings || [];
-                  const existingTop = currentItemToppings.find((t) => String(t.id) === String(topProduct.id));
-                  const topQty = existingTop ? existingTop.quantity : 0;
+              <div className="flex-1 overflow-y-auto py-4 space-y-3">
+                {toppingProducts.length === 0 ? (
+                  <p className="text-center text-gray-400 py-8">
+                    Chưa có sản phẩm thuộc danh mục Topping
+                  </p>
+                ) : (
+                  toppingProducts.map((topProduct) => {
+                    const currentItemToppings =
+                      cart[toppingModal.itemIndex]?.toppings || [];
+                    const existingTop = currentItemToppings.find(
+                      (t) => String(t.id) === String(topProduct.id),
+                    );
+                    const topQty = existingTop ? existingTop.quantity : 0;
 
-                  const handleUpdateToppingQty = (delta) => {
-                    const newQty = topQty + delta;
-                    setCart((prev) => {
-                      const targetItem = prev[toppingModal.itemIndex];
-                      if (!targetItem) return prev;
-                      let updatedToppings = [...(targetItem.toppings || [])];
-                      if (newQty <= 0) {
-                        updatedToppings = updatedToppings.filter((t) => String(t.id) !== String(topProduct.id));
-                      } else if (existingTop) {
-                        updatedToppings = updatedToppings.map((t) =>
-                          String(t.id) === String(topProduct.id) ? { ...t, quantity: newQty } : t
-                        );
-                      } else {
-                        updatedToppings.push({
-                          id: topProduct.id,
-                          name: topProduct.name,
-                          price: Number(topProduct.price || 0),
-                          quantity: 1,
-                        });
-                      }
-                      return prev.map((item, idx) =>
-                        idx === toppingModal.itemIndex ? { ...item, toppings: updatedToppings } : item
-                      );
-                    });
-                  };
-
-                  return (
-                    <div
-                      key={topProduct.id}
-                      className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-blue-50/50 transition"
-                    >
-                      <div>
-                        <p className="font-semibold text-gray-800 text-sm">{topProduct.name}</p>
-                        <p className="text-xs text-blue-600 font-bold">+{formatCurrency(topProduct.price)}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {topQty > 0 && (
-                          <button
-                            onClick={() => handleUpdateToppingQty(-1)}
-                            className="w-7 h-7 rounded-full bg-white border border-gray-300 font-bold text-gray-700 hover:bg-gray-100"
-                          >
-                            -
-                          </button>
-                        )}
-                        {topQty > 0 && <span className="font-bold text-sm min-w-[1.25rem] text-center">{topQty}</span>}
-                        <button
-                          onClick={() => handleUpdateToppingQty(1)}
-                          className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="pt-4 border-t flex justify-end">
-              <button
-                onClick={() => setToppingModal({ isOpen: false, itemIndex: -1 })}
-                className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-2xl hover:bg-blue-700 transition"
-              >
-                Hoàn tất
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Popup Ghi Chú (Note) */}
-      {noteModal.isOpen && noteModal.itemIndex >= 0 && cart[noteModal.itemIndex] && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between pb-4 border-b">
-              <div>
-                <h3 className="font-bold text-lg text-gray-800">
-                  Ghi chú cho: {cart[noteModal.itemIndex]?.name}
-                </h3>
-                <p className="text-xs text-gray-500">Chọn ghi chú nhanh hoặc nhập ghi chú tùy chỉnh</p>
-              </div>
-              <button
-                onClick={() => setNoteModal({ isOpen: false, itemIndex: -1, customText: "" })}
-                className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-2">Ghi chú có sẵn:</p>
-                <div className="flex flex-wrap gap-2">
-                  {PRESET_NOTES.map((preset) => {
-                    const currentNotes = cart[noteModal.itemIndex]?.notes || [];
-                    const isSelected = currentNotes.includes(preset);
-
-                    const toggleNote = () => {
+                    const handleUpdateToppingQty = (delta) => {
+                      const newQty = topQty + delta;
                       setCart((prev) => {
-                        const item = prev[noteModal.itemIndex];
-                        if (!item) return prev;
-                        const nextNotes = isSelected
-                          ? (item.notes || []).filter((n) => n !== preset)
-                          : [...(item.notes || []), preset];
-                        return prev.map((i, idx) =>
-                          idx === noteModal.itemIndex ? { ...i, notes: nextNotes } : i
+                        const targetItem = prev[toppingModal.itemIndex];
+                        if (!targetItem) return prev;
+                        let updatedToppings = [...(targetItem.toppings || [])];
+                        if (newQty <= 0) {
+                          updatedToppings = updatedToppings.filter(
+                            (t) => String(t.id) !== String(topProduct.id),
+                          );
+                        } else if (existingTop) {
+                          updatedToppings = updatedToppings.map((t) =>
+                            String(t.id) === String(topProduct.id)
+                              ? { ...t, quantity: newQty }
+                              : t,
+                          );
+                        } else {
+                          updatedToppings.push({
+                            id: topProduct.id,
+                            name: topProduct.name,
+                            price: Number(topProduct.price || 0),
+                            quantity: 1,
+                          });
+                        }
+                        return prev.map((item, idx) =>
+                          idx === toppingModal.itemIndex
+                            ? { ...item, toppings: updatedToppings }
+                            : item,
                         );
                       });
                     };
 
                     return (
-                      <button
-                        key={preset}
-                        onClick={toggleNote}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                          isSelected
-                            ? "bg-amber-500 text-white shadow-sm"
-                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                        }`}
+                      <div
+                        key={topProduct.id}
+                        className="flex items-center justify-between p-3 bg-gray-50 rounded-2xl border border-gray-100 hover:bg-blue-50/50 transition"
                       >
-                        {preset}
-                      </button>
+                        <div>
+                          <p className="font-semibold text-gray-800 text-sm">
+                            {topProduct.name}
+                          </p>
+                          <p className="text-xs text-blue-600 font-bold">
+                            +{formatCurrency(topProduct.price)}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {topQty > 0 && (
+                            <button
+                              onClick={() => handleUpdateToppingQty(-1)}
+                              className="w-7 h-7 rounded-full bg-white border border-gray-300 font-bold text-gray-700 hover:bg-gray-100"
+                            >
+                              -
+                            </button>
+                          )}
+                          {topQty > 0 && (
+                            <span className="font-bold text-sm min-w-[1.25rem] text-center">
+                              {topQty}
+                            </span>
+                          )}
+                          <button
+                            onClick={() => handleUpdateToppingQty(1)}
+                            className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-sm"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
                     );
-                  })}
+                  })
+                )}
+              </div>
+
+              <div className="pt-4 border-t flex justify-end">
+                <button
+                  onClick={() =>
+                    setToppingModal({ isOpen: false, itemIndex: -1 })
+                  }
+                  className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-2xl hover:bg-blue-700 transition"
+                >
+                  Hoàn tất
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* Popup Ghi Chú (Note) */}
+      {noteModal.isOpen &&
+        noteModal.itemIndex >= 0 &&
+        cart[noteModal.itemIndex] && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col max-h-[85vh]">
+              <div className="flex items-center justify-between pb-4 border-b">
+                <div>
+                  <h3 className="font-bold text-lg text-gray-800">
+                    Ghi chú cho: {cart[noteModal.itemIndex]?.name}
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Chọn ghi chú nhanh hoặc nhập ghi chú tùy chỉnh
+                  </p>
+                </div>
+                <button
+                  onClick={() =>
+                    setNoteModal({
+                      isOpen: false,
+                      itemIndex: -1,
+                      customText: "",
+                    })
+                  }
+                  className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold hover:bg-gray-200"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-4 space-y-4">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-2">
+                    Ghi chú có sẵn:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {PRESET_NOTES.map((preset) => {
+                      const currentNotes =
+                        cart[noteModal.itemIndex]?.notes || [];
+                      const isSelected = currentNotes.includes(preset);
+
+                      const toggleNote = () => {
+                        setCart((prev) => {
+                          const item = prev[noteModal.itemIndex];
+                          if (!item) return prev;
+                          const nextNotes = isSelected
+                            ? (item.notes || []).filter((n) => n !== preset)
+                            : [...(item.notes || []), preset];
+                          return prev.map((i, idx) =>
+                            idx === noteModal.itemIndex
+                              ? { ...i, notes: nextNotes }
+                              : i,
+                          );
+                        });
+                      };
+
+                      return (
+                        <button
+                          key={preset}
+                          onClick={toggleNote}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                            isSelected
+                              ? "bg-amber-500 text-white shadow-sm"
+                              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 mb-2">
+                    Ghi chú riêng:
+                  </p>
+                  <input
+                    type="text"
+                    value={noteModal.customText}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNoteModal((prev) => ({ ...prev, customText: val }));
+                      setCart((prev) =>
+                        prev.map((i, idx) =>
+                          idx === noteModal.itemIndex
+                            ? { ...i, customNote: val }
+                            : i,
+                        ),
+                      );
+                    }}
+                    placeholder="Ví dụ: Ít sữa, không lấy ống hút..."
+                    className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:border-amber-500 outline-none"
+                  />
                 </div>
               </div>
 
-              <div>
-                <p className="text-xs font-semibold text-gray-500 mb-2">Ghi chú riêng:</p>
-                <input
-                  type="text"
-                  value={noteModal.customText}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setNoteModal((prev) => ({ ...prev, customText: val }));
-                    setCart((prev) =>
-                      prev.map((i, idx) =>
-                        idx === noteModal.itemIndex ? { ...i, customNote: val } : i
-                      )
-                    );
-                  }}
-                  placeholder="Ví dụ: Ít sữa, không lấy ống hút..."
-                  className="w-full border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:border-amber-500 outline-none"
-                />
+              <div className="pt-4 border-t flex justify-end">
+                <button
+                  onClick={() =>
+                    setNoteModal({
+                      isOpen: false,
+                      itemIndex: -1,
+                      customText: "",
+                    })
+                  }
+                  className="px-6 py-2.5 bg-amber-500 text-white font-semibold rounded-2xl hover:bg-amber-600 transition"
+                >
+                  Lưu ghi chú
+                </button>
               </div>
             </div>
-
-            <div className="pt-4 border-t flex justify-end">
-              <button
-                onClick={() => setNoteModal({ isOpen: false, itemIndex: -1, customText: "" })}
-                className="px-6 py-2.5 bg-amber-500 text-white font-semibold rounded-2xl hover:bg-amber-600 transition"
-              >
-                Lưu ghi chú
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
       {/* Thanh tổng kết giỏ hàng nổi cho Mobile (< lg) */}
       {(cart.length > 0 || hasExistingOrder) && (
         <div className="fixed bottom-3 left-3 right-3 lg:hidden z-40 bg-slate-900/95 backdrop-blur-md text-white rounded-3xl p-3.5 shadow-2xl flex items-center justify-between border border-slate-700 animate-fade-in">
